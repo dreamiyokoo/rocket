@@ -215,8 +215,6 @@ def calculate(
 
     # RSI applied to moving-average series (parallel to history)
     rsi_chart = _rsi_series(moving_avg_series, rsi_period)
-    rsi_current = next((v for v in reversed(rsi_chart) if v is not None), None)
-
     # MACD applied to moving-average series (parallel to history)
     macd_chart = _macd_series(moving_avg_series, macd_fast, macd_slow, macd_signal)
 
