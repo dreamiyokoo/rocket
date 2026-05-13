@@ -39,8 +39,8 @@ async def post_rounds(
     _: dict = Depends(get_current_user),
 ):
     await db.execute(
-        text("INSERT INTO rounds (multiplier) SELECT unnest(:vals::numeric[])"),
-        {"vals": body.values},
+        text("INSERT INTO rounds (multiplier) VALUES (:val)"),
+        [{"val": v} for v in body.values],
     )
     await db.commit()
 
