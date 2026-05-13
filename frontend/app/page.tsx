@@ -348,9 +348,9 @@ export default function Home() {
       )}
 
       {/* RSI */}
-      {data?.ready && data.rsi && data.rsi.chart.length > 0 && (
+      {data?.ready && data.rsi && (
         <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-sm font-semibold text-gray-300">RSI（14期間）</h2>
             <div className="flex gap-4 text-xs text-gray-400">
               <span className="text-red-400">── 70 過買い</span>
@@ -360,14 +360,16 @@ export default function Home() {
               )}
             </div>
           </div>
-          <RsiChart rsi={data.rsi.chart} />
+          {data.rsi.chart.some((v) => v !== null)
+            ? <RsiChart rsi={data.rsi.chart} />
+            : <p className="text-sm text-gray-500 py-4 text-center">データ不足（15件以上必要、現在 {data.total_rounds} 件）</p>}
         </section>
       )}
 
       {/* MACD */}
-      {data?.ready && data.macd && data.macd.chart.some((p) => p !== null) && (
+      {data?.ready && data.macd && (
         <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-sm font-semibold text-gray-300">MACD（12/26/9）</h2>
             <div className="flex gap-4 text-xs text-gray-400">
               <span><span className="text-blue-400 font-bold">─</span> MACD</span>
@@ -375,7 +377,9 @@ export default function Home() {
               <span><span className="text-green-400 font-bold">■</span> ヒストグラム</span>
             </div>
           </div>
-          <MacdChart macd={data.macd.chart} />
+          {data.macd.chart.some((p) => p !== null)
+            ? <MacdChart macd={data.macd.chart} />
+            : <p className="text-sm text-gray-500 py-4 text-center">データ不足（35件以上必要、現在 {data.total_rounds} 件）</p>}
         </section>
       )}
 
