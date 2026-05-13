@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from core.database import get_db  # noqa: E402
 from core.redis import get_redis  # noqa: E402
-from core.security import create_access_token, pwd_context  # noqa: E402
+from core.security import create_access_token, hash_password  # noqa: E402
 from main import app  # noqa: E402
 
 
@@ -70,7 +70,7 @@ def clear_overrides():
 
 class TestLogin:
     def test_login_success(self):
-        hashed = pwd_context.hash("correct-password")
+        hashed = hash_password("correct-password")
         app.dependency_overrides[get_db] = lambda: _make_db(
             {"id": 1, "username": "admin", "password_hash": hashed}
         )
@@ -87,7 +87,7 @@ class TestLogin:
         assert data["token_type"] == "bearer"
 
     def test_login_wrong_password_returns_401(self):
-        hashed = pwd_context.hash("correct-password")
+        hashed = hash_password("correct-password")
         app.dependency_overrides[get_db] = lambda: _make_db(
             {"id": 1, "username": "admin", "password_hash": hashed}
         )

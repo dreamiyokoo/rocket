@@ -3,13 +3,11 @@ import asyncio
 import os
 
 import asyncpg
-from passlib.context import CryptContext
+import bcrypt
 
 DATABASE_URL = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
 SEED_USERNAME = os.getenv("SEED_USERNAME", "admin")
 SEED_PASSWORD = os.getenv("SEED_PASSWORD", "changeme")
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 async def main() -> None:
@@ -19,7 +17,7 @@ async def main() -> None:
         if existing:
             print(f"User '{SEED_USERNAME}' already exists, skipping.")
             return
-        hashed = pwd_context.hash(SEED_PASSWORD)
+        hashed = bcrypt.hashpw(SEED_PASSWORD.encode(), bcrypt.gensalt()).decode()
         await conn.execute(
             "INSERT INTO users (username, password_hash) VALUES ($1, $2)",
             SEED_USERNAME,
