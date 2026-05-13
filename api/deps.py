@@ -8,14 +8,17 @@ from core.database import get_db
 from core.redis import get_redis
 from core.security import TokenExpiredError, TokenInvalidError, decode_token
 
-bearer = HTTPBearer()
+bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ) -> dict:
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
     try:
         payload = decode_token(credentials.credentials)
     except TokenExpiredError:
@@ -50,4 +53,3 @@ async def get_current_user(
         "jti": jti,
         "exp": payload.get("exp"),
     }
-

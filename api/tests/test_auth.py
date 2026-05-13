@@ -142,10 +142,9 @@ class TestMe:
         )
         assert response.status_code == 401
 
-    def test_me_no_token_returns_403(self):
-        """HTTPBearer returns 403 when the Authorization header is absent."""
+    def test_me_no_token_returns_401(self):
         response = TestClient(app).get("/api/v1/auth/me")
-        assert response.status_code == 403
+        assert response.status_code == 401
 
     def test_me_revoked_token_returns_401(self):
         app.dependency_overrides[get_db] = lambda: _make_db(
@@ -187,6 +186,6 @@ class TestLogout:
         # The jti should have been stored in the denylist
         mock_redis.setex.assert_awaited_once()
 
-    def test_logout_without_token_returns_403(self):
+    def test_logout_without_token_returns_401(self):
         response = TestClient(app).post("/api/v1/auth/logout")
-        assert response.status_code == 403
+        assert response.status_code == 401

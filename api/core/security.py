@@ -23,7 +23,6 @@ class TokenExpiredError(Exception):
 class TokenInvalidError(Exception):
     """Raised when the JWT is malformed or has an invalid signature."""
 
-
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
@@ -51,4 +50,3 @@ def decode_token(token: str) -> dict:
         raise TokenExpiredError("Token has expired") from exc
     except JWTError as exc:
         raise TokenInvalidError("Invalid token") from exc
-
