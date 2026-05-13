@@ -11,7 +11,9 @@ function hasValidExpiration(token: string): boolean {
     if (!payload) {
       return false;
     }
-    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    const json = atob(padded);
     const parsed = JSON.parse(json) as { exp?: number };
     return typeof parsed.exp === "number" && parsed.exp * 1000 > Date.now();
   } catch {
@@ -57,7 +59,17 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        setError("ユーザー名またはパスワードが正しくありません。");
+        if (response.status === 401) {
+          setError("ユーザー名またはパスワードが正しくありません。");
+          return;
+        }
+
+        try {
+          const data: { detail?: string } = await response.json();
+          setError(data.detail ?? "ログインに失敗しました。時間をおいて再度お試しください。");
+        } catch {
+          setError("ログインに失敗しました。時間をおいて再度お試しください。");
+        }
         return;
       }
 
