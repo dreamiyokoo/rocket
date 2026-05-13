@@ -267,7 +267,7 @@ export default function InputPage() {
                 key={r.id}
                 className={`px-2 py-0.5 rounded text-xs font-mono font-semibold ${multiplierBadgeClass(r.multiplier)}`}
               >
-                {r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}x
+                {r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}
               </span>
             ))}
           </div>
