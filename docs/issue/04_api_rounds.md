@@ -19,11 +19,15 @@
 
 フロントエンドは改行区切りの入力文字列をパースして配列に変換してから送信する。
 
-```json
-// Request
-{ "values": [1.01, 1.5, 20, 2.05, 100] }
+**Request**
 
-// Response 201
+```json
+{ "values": [1.01, 1.5, 20, 2.05, 100] }
+```
+
+**Response 201**
+
+```json
 {
   "inserted": 5,
   "total": 23,
@@ -46,8 +50,9 @@
 
 ### `DELETE /api/v1/rounds`
 
+**Response 200**
+
 ```json
-// Response 200
 { "deleted": 23 }
 ```
 
