@@ -10,6 +10,8 @@ const READY_THRESHOLD = 18;
 
 type BB = { upper: number; middle: number; lower: number };
 
+type MacdPoint = { macd: number; signal: number | null; histogram: number | null };
+
 type AnalysisData = {
   ready: boolean;
   total_rounds: number;
@@ -23,6 +25,8 @@ type AnalysisData = {
   max?: number;
   min?: number;
   atr?: number;
+  rsi?: { current: number | null; chart: (number | null)[] };
+  macd?: { chart: (MacdPoint | null)[] };
   bollinger_bands?: { current: BB | null; chart: (BB | null)[] };
   chart_data?: { index: number; value: number }[];
   analyzed_at?: string;
@@ -159,6 +163,91 @@ function MultiplierChart({ data }: { data: AnalysisData }) {
   );
 }
 
+// ── RSI Chart ────────────────────────────────────────────────────────────────
+
+function RsiChart({ rsi }: { rsi: (number | null)[] }) {
+  const n = rsi.length;
+  const refLines = [30, 50, 70];
+
+  return (
+    <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-auto">
+      {refLines.map((r) => {
+        const y = yLinear(r, 0, 100);
+        return (
+          <g key={r}>
+            <line
+              x1={ML} y1={y} x2={ML + PW} y2={y}
+              stroke={r === 50 ? "#4b5563" : r === 70 ? "#ef4444" : "#3b82f6"}
+              strokeDasharray="4 2" strokeOpacity="0.6"
+            />
+            <text x={ML - 4} y={y + 4} textAnchor="end" fill="#9ca3af" fontSize="10">{r}</text>
+          </g>
+        );
+      })}
+      <path
+        d={toPath(rsi.map((v, i) => v != null ? [xOf(i, n), yLinear(v, 0, 100)] as const : null))}
+        fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinejoin="round"
+      />
+      <line x1={ML} y1={MT + PH} x2={ML + PW} y2={MT + PH} stroke="#4b5563" />
+      <text x={ML} y={VH} fill="#6b7280" fontSize="10">1</text>
+      <text x={ML + PW} y={VH} textAnchor="end" fill="#6b7280" fontSize="10">{n}</text>
+    </svg>
+  );
+}
+
+// ── MACD Chart ────────────────────────────────────────────────────────────────
+
+function MacdChart({ macd }: { macd: (MacdPoint | null)[] }) {
+  const n = macd.length;
+  const values = macd.flatMap((p) =>
+    p ? [p.macd, p.signal ?? p.macd, p.histogram ?? 0] : []
+  );
+  if (values.length === 0) return null;
+  const yMin = Math.min(...values);
+  const yMax = Math.max(...values);
+  const pad = (yMax - yMin) * 0.1 || 0.1;
+  const lo = yMin - pad;
+  const hi = yMax + pad;
+  const yM = (v: number) => yLinear(v, lo, hi);
+  const zero = yM(0);
+
+  const barW = Math.max(1, (PW / n) * 0.6);
+
+  return (
+    <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-auto">
+      {/* Zero line */}
+      <line x1={ML} y1={zero} x2={ML + PW} y2={zero} stroke="#4b5563" strokeDasharray="4 2" />
+      <text x={ML - 4} y={zero + 4} textAnchor="end" fill="#9ca3af" fontSize="10">0</text>
+      {/* Histogram bars */}
+      {macd.map((p, i) => {
+        if (!p || p.histogram == null) return null;
+        const x = xOf(i, n);
+        const y1 = Math.min(yM(p.histogram), zero);
+        const y2 = Math.max(yM(p.histogram), zero);
+        return (
+          <rect
+            key={i} x={x - barW / 2} y={y1} width={barW} height={Math.max(1, y2 - y1)}
+            fill={p.histogram >= 0 ? "#4ade80" : "#f87171"} opacity="0.5"
+          />
+        );
+      })}
+      {/* MACD line */}
+      <path
+        d={toPath(macd.map((p, i) => p ? [xOf(i, n), yM(p.macd)] as const : null))}
+        fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round"
+      />
+      {/* Signal line */}
+      <path
+        d={toPath(macd.map((p, i) => (p?.signal != null) ? [xOf(i, n), yM(p.signal)] as const : null))}
+        fill="none" stroke="#f59e0b" strokeWidth="1.5" strokeLinejoin="round" strokeDasharray="5 3"
+      />
+      <line x1={ML} y1={MT + PH} x2={ML + PW} y2={MT + PH} stroke="#4b5563" />
+      <text x={ML} y={VH} fill="#6b7280" fontSize="10">1</text>
+      <text x={ML + PW} y={VH} textAnchor="end" fill="#6b7280" fontSize="10">{n}</text>
+    </svg>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
@@ -255,6 +344,38 @@ export default function Home() {
             </div>
           </div>
           <MultiplierChart data={data} />
+        </section>
+      )}
+
+      {/* RSI */}
+      {data?.ready && data.rsi && data.rsi.chart.length > 0 && (
+        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-300">RSI（14期間）</h2>
+            <div className="flex gap-4 text-xs text-gray-400">
+              <span className="text-red-400">── 70 過買い</span>
+              <span className="text-blue-400">── 30 過売り</span>
+              {data.rsi.current != null && (
+                <span className="text-purple-400 font-bold">現在 {data.rsi.current.toFixed(1)}</span>
+              )}
+            </div>
+          </div>
+          <RsiChart rsi={data.rsi.chart} />
+        </section>
+      )}
+
+      {/* MACD */}
+      {data?.ready && data.macd && data.macd.chart.some((p) => p !== null) && (
+        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-gray-300">MACD（12/26/9）</h2>
+            <div className="flex gap-4 text-xs text-gray-400">
+              <span><span className="text-blue-400 font-bold">─</span> MACD</span>
+              <span><span className="text-yellow-400 font-bold">--</span> シグナル</span>
+              <span><span className="text-green-400 font-bold">■</span> ヒストグラム</span>
+            </div>
+          </div>
+          <MacdChart macd={data.macd.chart} />
         </section>
       )}
 

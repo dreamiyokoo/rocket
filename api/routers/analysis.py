@@ -45,6 +45,17 @@ def _build_response(result, analyzed_at: str) -> dict:
         "max": result.max,
         "min": result.min,
         "atr": result.atr,
+        "rsi": {
+            "current": result.rsi_current,
+            "chart": result.rsi_chart,
+        },
+        "macd": {
+            "chart": [
+                {"macd": p.macd, "signal": p.signal, "histogram": p.histogram}
+                if p else None
+                for p in result.macd_chart
+            ],
+        },
         "bollinger_bands": {
             "current": {
                 "upper": result.bollinger_current.upper,
