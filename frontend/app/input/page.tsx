@@ -2,29 +2,10 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { clearAccessToken, getValidAccessToken } from "../lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const READY_THRESHOLD = 18;
-
-function hasValidExpiration(token: string): boolean {
-  try {
-    const [, payload] = token.split(".");
-    if (!payload) return false;
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-    const parsed = JSON.parse(atob(padded)) as { exp?: number };
-    return typeof parsed.exp === "number" && parsed.exp * 1000 > Date.now();
-  } catch {
-    return false;
-  }
-}
-
-function getToken(): string | null {
-  const token = localStorage.getItem("access_token");
-  if (token && hasValidExpiration(token)) return token;
-  if (token) localStorage.removeItem("access_token");
-  return null;
-}
 
 function multiplierBadgeClass(v: number): string {
   if (v >= 10) return "bg-red-700 text-white";
@@ -52,7 +33,13 @@ export default function InputPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const handleUnauthorized = useCallback(() => {
+    clearAccessToken();
+    router.replace("/login");
+  }, [router]);
+
   const fetchStatus = useCallback(async () => {
+    if (!API_URL) return;
     try {
       const res = await fetch(`${API_URL}/api/v1/analysis`);
       if (!res.ok) return;
@@ -64,6 +51,7 @@ export default function InputPage() {
   }, []);
 
   const fetchRounds = useCallback(async () => {
+    if (!API_URL) return;
     try {
       const res = await fetch(`${API_URL}/api/v1/rounds?limit=72`);
       if (!res.ok) return;
@@ -75,9 +63,15 @@ export default function InputPage() {
   }, []);
 
   useEffect(() => {
-    const token = getToken();
+    const token = getValidAccessToken();
     if (!token) {
       router.replace("/login");
+      return;
+    }
+    if (!API_URL) {
+      setCheckingAuth(false);
+      setToast({ message: "API接続先が設定されていません。", type: "error" });
+      setTimeout(() => setToast(null), 3000);
       return;
     }
     setCheckingAuth(false);
@@ -91,7 +85,7 @@ export default function InputPage() {
     const values: number[] = [];
     for (const line of lines) {
       const n = Number(line);
-      if (isNaN(n) || line === "") return { error: `「${line}」は数値ではありません。` };
+      if (isNaN(n)) return { error: `「${line}」は数値ではありません。` };
       if (n <= 0) return { error: `「${line}」は0より大きい値を入力してください。` };
       values.push(n);
     }
@@ -108,7 +102,12 @@ export default function InputPage() {
       return;
     }
 
-    const token = getToken();
+    if (!API_URL) {
+      showToast("API接続先が設定されていません。", "error");
+      return;
+    }
+
+    const token = getValidAccessToken();
     if (!token) { router.replace("/login"); return; }
 
     setSubmitting(true);
@@ -119,6 +118,10 @@ export default function InputPage() {
         body: JSON.stringify({ values: parsed.values }),
       });
       if (!res.ok) {
+        if (res.status === 401) {
+          handleUnauthorized();
+          return;
+        }
         showToast("送信に失敗しました。", "error");
         return;
       }
@@ -135,7 +138,12 @@ export default function InputPage() {
   const handleReset = async () => {
     if (!confirm("全データを削除します。よろしいですか？")) return;
 
-    const token = getToken();
+    if (!API_URL) {
+      showToast("API接続先が設定されていません。", "error");
+      return;
+    }
+
+    const token = getValidAccessToken();
     if (!token) { router.replace("/login"); return; }
 
     setResetting(true);
@@ -145,6 +153,10 @@ export default function InputPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
+        if (res.status === 401) {
+          handleUnauthorized();
+          return;
+        }
         showToast("リセットに失敗しました。", "error");
         return;
       }
@@ -159,18 +171,27 @@ export default function InputPage() {
   };
 
   const handleLogout = async () => {
-    const token = getToken();
+    if (!API_URL) {
+      showToast("API接続先が設定されていません。", "error");
+      return;
+    }
+
+    const token = getValidAccessToken();
     if (token) {
       try {
-        await fetch(`${API_URL}/api/v1/auth/logout`, {
+        const res = await fetch(`${API_URL}/api/v1/auth/logout`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (res.status === 401) {
+          handleUnauthorized();
+          return;
+        }
       } catch {
         // best-effort
       }
     }
-    localStorage.removeItem("access_token");
+    clearAccessToken();
     router.replace("/login");
   };
 
