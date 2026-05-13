@@ -3,7 +3,21 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+function hasValidExpiration(token: string): boolean {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) {
+      return false;
+    }
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    const parsed = JSON.parse(json) as { exp?: number };
+    return typeof parsed.exp === "number" && parsed.exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,9 +29,12 @@ export default function LoginPage() {
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
-    if (token) {
+    if (token && hasValidExpiration(token)) {
       router.replace("/input");
       return;
+    }
+    if (token) {
+      localStorage.removeItem("access_token");
     }
     setCheckingAuth(false);
   }, [router]);
@@ -28,6 +45,11 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      if (!API_URL) {
+        setError("API接続先が設定されていません。");
+        return;
+      }
+
       const response = await fetch(`${API_URL}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -35,7 +57,7 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        setError("IDまたはパスワードが正しくありません。");
+        setError("ユーザー名またはパスワードが正しくありません。");
         return;
       }
 
