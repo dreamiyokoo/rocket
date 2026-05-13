@@ -51,7 +51,7 @@ def test_prob_all_below_2x():
 
 
 def test_prob_mixed():
-    # 9 values >= 2x, 3 values >= 5x, 1 value >= 10x
+    # 9 values >= 2x, 4 values >= 5x, 1 value >= 10x
     data = [1.0] * 9 + [2.0] * 5 + [5.0] * 3 + [10.0] * 1
     assert len(data) == WINDOW
     result = _make(data)

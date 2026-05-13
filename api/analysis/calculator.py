@@ -66,7 +66,7 @@ def calculate(multipliers: list[float]) -> AnalysisResult:
         prob_2x=history[-1].prob_2x,
         prob_5x=history[-1].prob_5x,
         prob_10x=history[-1].prob_10x,
-        moving_avg=statistics.mean(recent),
+        moving_avg=history[-1].moving_avg,
         median=statistics.median(recent),
         std_dev=statistics.stdev(recent),
         max=max(multipliers),
