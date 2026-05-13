@@ -31,7 +31,9 @@ async def get_current_user(
     # Look up user by stable ID to avoid username-rename issues
     try:
         user_id = int(payload["sub"])
-    except (KeyError, ValueError):
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing user identifier")
+    except ValueError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     row = await db.execute(

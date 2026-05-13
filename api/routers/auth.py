@@ -53,6 +53,8 @@ async def logout(
     exp = current_user.get("exp")
     if jti and exp:
         ttl = int(exp - datetime.now(timezone.utc).timestamp())
+        # If the token is already expired, it cannot be used anyway, so no
+        # denylist entry is needed (the signature check would have rejected it).
         if ttl > 0:
             await redis.setex(f"denylist:{jti}", ttl, "1")
 
