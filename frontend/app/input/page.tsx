@@ -68,8 +68,7 @@ export default function InputPage() {
       const res = await fetch(`${API_URL}/api/v1/rounds?limit=72`);
       if (!res.ok) return;
       const data = await res.json() as { rounds: Round[] };
-      // API returns newest-first; reverse to show oldest-first
-      setRounds([...data.rounds].reverse());
+      setRounds(data.rounds);
     } catch {
       // best-effort
     }
@@ -257,15 +256,12 @@ export default function InputPage() {
       {/* History */}
       {rounds.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-sm text-gray-400">
-            入力履歴（古い順）
-            <span className="ml-2 text-xs text-gray-600">※ゲーム表示は新しい順</span>
-          </h2>
-          <div className="flex flex-wrap gap-2">
+          <h2 className="text-sm text-gray-400">入力履歴（新しい順）</h2>
+          <div className="grid grid-cols-6 gap-2">
             {rounds.map((r) => (
               <span
                 key={r.id}
-                className={`px-2 py-0.5 rounded text-xs font-mono font-semibold ${multiplierBadgeClass(r.multiplier)}`}
+                className={`px-2 py-0.5 rounded text-xs font-mono font-semibold text-center ${multiplierBadgeClass(r.multiplier)}`}
               >
                 {r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}
               </span>
