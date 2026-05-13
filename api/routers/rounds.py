@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ router = APIRouter(prefix="/api/v1/rounds", tags=["rounds"])
 
 READY_THRESHOLD = 18
 MAX_LIMIT = 72
+MAX_POST_VALUES = 1000
 
 
 class RoundsPostRequest(BaseModel):
@@ -21,6 +22,8 @@ class RoundsPostRequest(BaseModel):
     def validate_values(cls, v: list[float]) -> list[float]:
         if not v:
             raise ValueError("values must not be empty")
+        if len(v) > MAX_POST_VALUES:
+            raise ValueError(f"values must contain at most {MAX_POST_VALUES} items")
         if any(x <= 0 for x in v):
             raise ValueError("each value must be greater than 0")
         return v
