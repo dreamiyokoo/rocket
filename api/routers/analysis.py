@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,10 +102,13 @@ async def get_analysis(
     key = _cache_key(rsi_period, macd_fast, macd_slow, macd_signal)
     try:
         cached = await redis.get(key)
-        if cached:
+    except RedisError:
+        cached = None
+    if cached:
+        try:
             return json.loads(cached)
-    except Exception:
-        pass
+        except json.JSONDecodeError:
+            pass
 
     rows = await db.execute(
         text("SELECT multiplier FROM rounds ORDER BY recorded_at ASC")
@@ -117,6 +121,6 @@ async def get_analysis(
     response = _build_response(result, analyzed_at)
     try:
         await redis.setex(key, CACHE_TTL, json.dumps(response))
-    except Exception:
+    except RedisError:
         pass
     return response
