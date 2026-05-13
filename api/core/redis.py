@@ -1,13 +1,12 @@
-import os
-import redis.asyncio as aioredis
+from redis.asyncio import Redis
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
+from core.config import settings
 
-_pool: aioredis.Redis | None = None
+_pool: Redis | None = None
 
 
-def get_redis() -> aioredis.Redis:
+def get_redis() -> Redis:
     global _pool
     if _pool is None:
-        _pool = aioredis.from_url(REDIS_URL, decode_responses=True)
+        _pool = Redis.from_url(settings.REDIS_URL, decode_responses=True)
     return _pool
