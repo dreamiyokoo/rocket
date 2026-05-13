@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from redis.exceptions import RedisError  # noqa: E402
 
 from core.database import get_db  # noqa: E402
 from core.redis import get_redis  # noqa: E402
@@ -101,3 +102,16 @@ class TestGetAnalysis:
         app.dependency_overrides[get_redis] = lambda: mock_redis
         TestClient(app).get("/api/v1/analysis")
         mock_redis.setex.assert_awaited_once()
+
+    def test_redis_down_falls_back_to_db(self):
+        mock_db = _make_db([1.5] * WINDOW)
+        broken_redis = AsyncMock()
+        broken_redis.get = AsyncMock(side_effect=RedisError("Redis connection refused"))
+        broken_redis.setex = AsyncMock(side_effect=RedisError("Redis connection refused"))
+        app.dependency_overrides[get_db] = lambda: mock_db
+        app.dependency_overrides[get_redis] = lambda: broken_redis
+        response = TestClient(app).get("/api/v1/analysis")
+        assert response.status_code == 200
+        assert response.json()["ready"] is True
+        broken_redis.get.assert_awaited_once()
+        mock_db.execute.assert_awaited_once()

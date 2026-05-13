@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, field_validator
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,15 +40,19 @@ async def post_rounds(
     _: dict = Depends(get_current_user),
 ):
     await db.execute(
-        text("INSERT INTO rounds (multiplier) VALUES (:val)"),
-        [{"val": v} for v in body.values],
+        text("INSERT INTO rounds (multiplier) SELECT v FROM unnest(CAST(:vals AS numeric[])) AS v"),
+        {"vals": body.values},
     )
     await db.commit()
 
     total_row = await db.execute(text("SELECT COUNT(*) FROM rounds"))
     total = total_row.scalar()
 
-    await redis.delete(ANALYSIS_CACHE_KEY)
+    try:
+        await redis.delete(ANALYSIS_CACHE_KEY)
+    except RedisError:
+        # Cache invalidation failures must not break successful writes.
+        pass
 
     return {"inserted": len(body.values), "total": total, "ready": total >= READY_THRESHOLD}
 
@@ -82,6 +87,10 @@ async def delete_rounds(
     await db.execute(text("TRUNCATE rounds"))
     await db.commit()
 
-    await redis.delete(ANALYSIS_CACHE_KEY)
+    try:
+        await redis.delete(ANALYSIS_CACHE_KEY)
+    except RedisError:
+        # Cache invalidation failures must not break successful writes.
+        pass
 
     return {"deleted": deleted}

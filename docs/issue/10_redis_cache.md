@@ -36,10 +36,10 @@ DELETE /api/v1/rounds
 
 ## 受け入れ条件
 
-- [ ] キャッシュヒット時に DB クエリが発生しない
-- [ ] 倍率登録後に `GET /api/v1/analysis` を呼ぶと新しい値が返る
-- [ ] リセット後に `GET /api/v1/analysis` を呼ぶと `ready: false` が返る
-- [ ] Redis が落ちた場合も API は正常に動作する（Redis 障害時は DB から直接返す）
+- [x] キャッシュヒット時に DB クエリが発生しない
+- [x] 倍率登録後に `GET /api/v1/analysis` を呼ぶと新しい値が返る
+- [x] リセット後に `GET /api/v1/analysis` を呼ぶと `ready: false` が返る
+- [x] Redis が落ちた場合も API は正常に動作する（Redis 障害時は DB から直接返す）
 
 ## 技術メモ
 
