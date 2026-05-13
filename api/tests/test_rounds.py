@@ -11,12 +11,13 @@ os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-purposes-only-xx")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
 
-from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
+from unittest.mock import AsyncMock, MagicMock  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from core.database import get_db  # noqa: E402
+from core.redis import get_redis  # noqa: E402
 from deps import get_current_user  # noqa: E402
 from main import app  # noqa: E402
 
@@ -61,17 +62,15 @@ def clear_overrides():
 
 class TestPostRounds:
     def test_post_rounds_success(self):
+        mock_redis = AsyncMock()
         app.dependency_overrides[get_db] = lambda: _make_db([None, 5])
         app.dependency_overrides[get_current_user] = lambda: _CURRENT_USER
+        app.dependency_overrides[get_redis] = lambda: mock_redis
 
-        with patch("routers.rounds.get_redis") as mock_get_redis:
-            mock_redis = AsyncMock()
-            mock_get_redis.return_value = mock_redis
-
-            response = TestClient(app).post(
-                "/api/v1/rounds",
-                json={"values": [1.5, 2.0, 3.0]},
-            )
+        response = TestClient(app).post(
+            "/api/v1/rounds",
+            json={"values": [1.5, 2.0, 3.0]},
+        )
 
         assert response.status_code == 201
         data = response.json()
@@ -80,17 +79,15 @@ class TestPostRounds:
         assert data["ready"] is False  # 5 < 18
 
     def test_post_rounds_ready_when_total_exceeds_threshold(self):
+        mock_redis = AsyncMock()
         app.dependency_overrides[get_db] = lambda: _make_db([None, 20])
         app.dependency_overrides[get_current_user] = lambda: _CURRENT_USER
+        app.dependency_overrides[get_redis] = lambda: mock_redis
 
-        with patch("routers.rounds.get_redis") as mock_get_redis:
-            mock_redis = AsyncMock()
-            mock_get_redis.return_value = mock_redis
-
-            response = TestClient(app).post(
-                "/api/v1/rounds",
-                json={"values": [1.5]},
-            )
+        response = TestClient(app).post(
+            "/api/v1/rounds",
+            json={"values": [1.5]},
+        )
 
         assert response.status_code == 201
         assert response.json()["ready"] is True  # 20 >= 18
@@ -197,14 +194,12 @@ class TestDeleteRounds:
         count_result.scalar.return_value = 10
         mock_db.execute = AsyncMock(side_effect=[count_result, MagicMock()])
         mock_db.commit = AsyncMock()
+        mock_redis = AsyncMock()
         app.dependency_overrides[get_db] = lambda: mock_db
         app.dependency_overrides[get_current_user] = lambda: _CURRENT_USER
+        app.dependency_overrides[get_redis] = lambda: mock_redis
 
-        with patch("routers.rounds.get_redis") as mock_get_redis:
-            mock_redis = AsyncMock()
-            mock_get_redis.return_value = mock_redis
-
-            response = TestClient(app).delete("/api/v1/rounds")
+        response = TestClient(app).delete("/api/v1/rounds")
 
         assert response.status_code == 200
         assert response.json()["deleted"] == 10

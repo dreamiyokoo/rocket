@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, field_validator
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from core.redis import get_redis
 from deps import get_current_user
+from routers.analysis import CACHE_KEY as ANALYSIS_CACHE_KEY
 
 router = APIRouter(prefix="/api/v1/rounds", tags=["rounds"])
 
@@ -33,6 +35,7 @@ class RoundsPostRequest(BaseModel):
 async def post_rounds(
     body: RoundsPostRequest,
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
     _: dict = Depends(get_current_user),
 ):
     await db.execute(
@@ -44,8 +47,7 @@ async def post_rounds(
     total_row = await db.execute(text("SELECT COUNT(*) FROM rounds"))
     total = total_row.scalar()
 
-    redis = get_redis()
-    await redis.delete("analysis:latest")
+    await redis.delete(ANALYSIS_CACHE_KEY)
 
     return {"inserted": len(body.values), "total": total, "ready": total >= READY_THRESHOLD}
 
@@ -71,6 +73,7 @@ async def get_rounds(
 @router.delete("")
 async def delete_rounds(
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
     _: dict = Depends(get_current_user),
 ):
     count_row = await db.execute(text("SELECT COUNT(*) FROM rounds"))
@@ -79,7 +82,6 @@ async def delete_rounds(
     await db.execute(text("TRUNCATE rounds"))
     await db.commit()
 
-    redis = get_redis()
-    await redis.delete("analysis:latest")
+    await redis.delete(ANALYSIS_CACHE_KEY)
 
     return {"deleted": deleted}
