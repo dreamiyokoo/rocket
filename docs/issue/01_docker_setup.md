@@ -18,12 +18,12 @@
 
 ## 受け入れ条件
 
-- [ ] `docker compose up` で全サービスが起動する
-- [ ] `api` コンテナから `db`・`redis` コンテナに接続できる
-- [ ] `frontend` コンテナから `api` コンテナに接続できる
-- [ ] `.env.example` に必要な環境変数がすべて記載されている
-- [ ] 各サービスに個別 `Dockerfile` が存在する
-- [ ] `GET /api/v1/health` が `200 OK` を返す
+- [x] `docker compose up` で全サービスが起動する
+- [x] `api` コンテナから `db`・`redis` コンテナに接続できる
+- [x] `frontend` コンテナから `api` コンテナに接続できる
+- [x] `.env.example` に必要な環境変数がすべて記載されている
+- [x] 各サービスに個別 `Dockerfile` が存在する
+- [x] `GET /api/v1/health` が `200 OK` を返す
 
 ## 技術メモ
 

@@ -1,2 +1,14 @@
 /.env
 /.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+
+# Node.js
+node_modules/
+.next/
+
