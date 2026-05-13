@@ -68,9 +68,12 @@ async def get_analysis(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    cached = await redis.get(CACHE_KEY)
-    if cached:
-        return json.loads(cached)
+    try:
+        cached = await redis.get(CACHE_KEY)
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        pass
 
     rows = await db.execute(
         text("SELECT multiplier FROM rounds ORDER BY recorded_at ASC")
@@ -81,5 +84,10 @@ async def get_analysis(
     analyzed_at = datetime.now(timezone.utc).isoformat()
 
     response = _build_response(result, analyzed_at)
-    await redis.setex(CACHE_KEY, CACHE_TTL, json.dumps(response))
+
+    try:
+        await redis.setex(CACHE_KEY, CACHE_TTL, json.dumps(response))
+    except Exception:
+        pass
+
     return response

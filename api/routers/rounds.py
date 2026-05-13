@@ -39,15 +39,18 @@ async def post_rounds(
     _: dict = Depends(get_current_user),
 ):
     await db.execute(
-        text("INSERT INTO rounds (multiplier) SELECT unnest(:vals::numeric[])"),
-        {"vals": body.values},
+        text("INSERT INTO rounds (multiplier) VALUES (:val)"),
+        [{"val": v} for v in body.values],
     )
     await db.commit()
 
     total_row = await db.execute(text("SELECT COUNT(*) FROM rounds"))
     total = total_row.scalar()
 
-    await redis.delete(ANALYSIS_CACHE_KEY)
+    try:
+        await redis.delete(ANALYSIS_CACHE_KEY)
+    except Exception:
+        pass
 
     return {"inserted": len(body.values), "total": total, "ready": total >= READY_THRESHOLD}
 
@@ -82,6 +85,9 @@ async def delete_rounds(
     await db.execute(text("TRUNCATE rounds"))
     await db.commit()
 
-    await redis.delete(ANALYSIS_CACHE_KEY)
+    try:
+        await redis.delete(ANALYSIS_CACHE_KEY)
+    except Exception:
+        pass
 
     return {"deleted": deleted}

@@ -101,3 +101,13 @@ class TestGetAnalysis:
         app.dependency_overrides[get_redis] = lambda: mock_redis
         TestClient(app).get("/api/v1/analysis")
         mock_redis.setex.assert_awaited_once()
+
+    def test_redis_down_falls_back_to_db(self):
+        broken_redis = AsyncMock()
+        broken_redis.get = AsyncMock(side_effect=Exception("Redis connection refused"))
+        broken_redis.setex = AsyncMock(side_effect=Exception("Redis connection refused"))
+        app.dependency_overrides[get_db] = lambda: _make_db([1.5] * WINDOW)
+        app.dependency_overrides[get_redis] = lambda: broken_redis
+        response = TestClient(app).get("/api/v1/analysis")
+        assert response.status_code == 200
+        assert response.json()["ready"] is True
