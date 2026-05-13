@@ -102,13 +102,10 @@ async def get_analysis(
     key = _cache_key(rsi_period, macd_fast, macd_slow, macd_signal)
     try:
         cached = await redis.get(key)
-    except RedisError:
-        cached = None
-    if cached:
-        try:
+        if cached:
             return json.loads(cached)
-        except json.JSONDecodeError:
-            pass
+    except (RedisError, json.JSONDecodeError):
+        pass
 
     rows = await db.execute(
         text("SELECT multiplier FROM rounds ORDER BY recorded_at ASC")
