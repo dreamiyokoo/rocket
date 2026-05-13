@@ -35,7 +35,7 @@
 }
 ```
 
-`ready: false` はデータが 18 件未満で分析未算出を示す。
+登録後の `total` が 18 件未満のときだけ `ready: false` となり、分析未算出を示す。
 
 ### `GET /api/v1/rounds?limit=72`
 
