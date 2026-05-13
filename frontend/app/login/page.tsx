@@ -2,21 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ACCESS_TOKEN_KEY, getValidAccessToken } from "../lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
-function hasValidExpiration(token: string): boolean {
-  try {
-    const [, payload] = token.split(".");
-    if (!payload) return false;
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-    const parsed = JSON.parse(atob(padded)) as { exp?: number };
-    return typeof parsed.exp === "number" && parsed.exp * 1000 > Date.now();
-  } catch {
-    return false;
-  }
-}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,12 +15,11 @@ export default function LoginPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem("access_token");
-    if (token && hasValidExpiration(token)) {
+    const token = getValidAccessToken();
+    if (token) {
       router.replace("/input");
       return;
     }
-    if (token) localStorage.removeItem("access_token");
     setCheckingAuth(false);
   }, [router]);
 
@@ -68,7 +55,7 @@ export default function LoginPage() {
       }
 
       const data: { access_token: string } = await response.json();
-      localStorage.setItem("access_token", data.access_token);
+      localStorage.setItem(ACCESS_TOKEN_KEY, data.access_token);
       router.push("/input");
     } catch {
       setError("ログインに失敗しました。時間をおいて再度お試しください。");

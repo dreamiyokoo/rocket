@@ -1,12 +1,19 @@
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from analysis.calculator import WINDOW, calculate
+from analysis.calculator import (
+    MACD_FAST_DEFAULT,
+    MACD_SIGNAL_DEFAULT,
+    MACD_SLOW_DEFAULT,
+    RSI_PERIOD_DEFAULT,
+    WINDOW,
+    calculate,
+)
 from core.database import get_db
 from core.redis import get_redis
 
@@ -14,6 +21,10 @@ router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
 CACHE_KEY = "analysis:current"
 CACHE_TTL = 60
+
+
+def _cache_key(rsi: int, mf: int, ms: int, msig: int) -> str:
+    return f"{CACHE_KEY}:rsi{rsi}:macd{mf}-{ms}-{msig}"
 
 
 def _build_response(result, analyzed_at: str) -> dict:
@@ -45,6 +56,21 @@ def _build_response(result, analyzed_at: str) -> dict:
         "max": result.max,
         "min": result.min,
         "atr": result.atr,
+        "rsi": {
+            "period": result.rsi_period,
+            "current": next((v for v in reversed(result.rsi_chart) if v is not None), None),
+            "chart": result.rsi_chart,
+        },
+        "macd": {
+            "fast": result.macd_fast,
+            "slow": result.macd_slow,
+            "signal_period": result.macd_signal_period,
+            "chart": [
+                {"macd": p.macd, "signal": p.signal, "histogram": p.histogram}
+                if p else None
+                for p in result.macd_chart
+            ],
+        },
         "bollinger_bands": {
             "current": {
                 "upper": result.bollinger_current.upper,
@@ -65,11 +91,16 @@ def _build_response(result, analyzed_at: str) -> dict:
 
 @router.get("")
 async def get_analysis(
+    rsi_period: int = Query(default=RSI_PERIOD_DEFAULT, ge=2, le=50, alias="rsi_period"),
+    macd_fast: int = Query(default=MACD_FAST_DEFAULT, ge=2, le=50, alias="macd_fast"),
+    macd_slow: int = Query(default=MACD_SLOW_DEFAULT, ge=3, le=100, alias="macd_slow"),
+    macd_signal: int = Query(default=MACD_SIGNAL_DEFAULT, ge=2, le=30, alias="macd_signal"),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    key = _cache_key(rsi_period, macd_fast, macd_slow, macd_signal)
     try:
-        cached = await redis.get(CACHE_KEY)
+        cached = await redis.get(key)
         if cached:
             return json.loads(cached)
     except Exception:
@@ -80,14 +111,12 @@ async def get_analysis(
     )
     multipliers = [float(r.multiplier) for r in rows]
 
-    result = calculate(multipliers)
+    result = calculate(multipliers, rsi_period, macd_fast, macd_slow, macd_signal)
     analyzed_at = datetime.now(timezone.utc).isoformat()
 
     response = _build_response(result, analyzed_at)
-
     try:
-        await redis.setex(CACHE_KEY, CACHE_TTL, json.dumps(response))
+        await redis.setex(key, CACHE_TTL, json.dumps(response))
     except Exception:
         pass
-
     return response
