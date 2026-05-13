@@ -37,11 +37,11 @@ CREATE TABLE analysis_snapshots (
 
 ## 受け入れ条件
 
-- [ ] 上記3テーブルがマイグレーションで作成される
-- [ ] `users` テーブルに入力者1名の初期データが seed として投入される
-- [ ] `rounds.multiplier` に 0 以下の値が入らないよう CHECK 制約を設ける
-- [ ] `recorded_at` にインデックスを設ける（時系列クエリ用）
-- [ ] マイグレーションは `alembic upgrade head` で適用できる
+- [x] 上記3テーブルがマイグレーションで作成される
+- [x] `users` テーブルに入力者1名の初期データが seed として投入される
+- [x] `rounds.multiplier` に 0 以下の値が入らないよう CHECK 制約を設ける
+- [x] `recorded_at` にインデックスを設ける（時系列クエリ用）
+- [x] マイグレーションは `alembic upgrade head` で適用できる
 
 ## 技術メモ
 
