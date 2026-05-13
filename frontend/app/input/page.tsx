@@ -26,6 +26,14 @@ function getToken(): string | null {
   return null;
 }
 
+function multiplierBadgeClass(v: number): string {
+  if (v >= 10) return "bg-red-700 text-white";
+  if (v >= 5)  return "bg-yellow-500 text-black";
+  if (v >= 2)  return "bg-green-600 text-white";
+  return "bg-blue-600 text-white";
+}
+
+type Round = { id: number; multiplier: number; recorded_at: string };
 type AnalysisStatus = { total_rounds: number; ready: boolean } | null;
 
 export default function InputPage() {
@@ -37,6 +45,7 @@ export default function InputPage() {
   const [submitting, setSubmitting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [status, setStatus] = useState<AnalysisStatus>(null);
+  const [rounds, setRounds] = useState<Round[]>([]);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -50,7 +59,19 @@ export default function InputPage() {
       const data = await res.json() as { total_rounds: number; ready: boolean };
       setStatus({ total_rounds: data.total_rounds, ready: data.ready });
     } catch {
-      // status fetch is best-effort
+      // best-effort
+    }
+  }, []);
+
+  const fetchRounds = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/rounds?limit=72`);
+      if (!res.ok) return;
+      const data = await res.json() as { rounds: Round[] };
+      // API returns newest-first; reverse to show oldest-first
+      setRounds([...data.rounds].reverse());
+    } catch {
+      // best-effort
     }
   }, []);
 
@@ -62,7 +83,8 @@ export default function InputPage() {
     }
     setCheckingAuth(false);
     fetchStatus();
-  }, [router, fetchStatus]);
+    fetchRounds();
+  }, [router, fetchStatus, fetchRounds]);
 
   const parseValues = (): { values: number[] } | { error: string } => {
     const lines = text.split("\n").map((s) => s.trim()).filter(Boolean);
@@ -103,7 +125,7 @@ export default function InputPage() {
       }
       setText("");
       showToast(`${parsed.values.length}件を送信しました。`, "success");
-      await fetchStatus();
+      await Promise.all([fetchStatus(), fetchRounds()]);
     } catch {
       showToast("送信に失敗しました。", "error");
     } finally {
@@ -129,6 +151,7 @@ export default function InputPage() {
       }
       showToast("全データを削除しました。", "success");
       setStatus({ total_rounds: 0, ready: false });
+      setRounds([]);
     } catch {
       showToast("リセットに失敗しました。", "error");
     } finally {
@@ -230,6 +253,32 @@ export default function InputPage() {
           </button>
         </div>
       </form>
+
+      {/* History */}
+      {rounds.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="text-sm text-gray-400">
+            入力履歴（古い順）
+            <span className="ml-2 text-xs text-gray-600">※ゲーム表示は新しい順</span>
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {rounds.map((r) => (
+              <span
+                key={r.id}
+                className={`px-2 py-0.5 rounded text-xs font-mono font-semibold ${multiplierBadgeClass(r.multiplier)}`}
+              >
+                {r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}x
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-3 text-xs text-gray-600 mt-1">
+            <span><span className="inline-block w-2 h-2 rounded-sm bg-blue-600 mr-1"/>1x台</span>
+            <span><span className="inline-block w-2 h-2 rounded-sm bg-green-600 mr-1"/>2x以上</span>
+            <span><span className="inline-block w-2 h-2 rounded-sm bg-yellow-500 mr-1"/>5x以上</span>
+            <span><span className="inline-block w-2 h-2 rounded-sm bg-red-700 mr-1"/>10x以上</span>
+          </div>
+        </section>
+      )}
 
       {/* Toast */}
       {toast && (
