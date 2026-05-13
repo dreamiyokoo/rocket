@@ -44,6 +44,18 @@ def _build_response(result, analyzed_at: str) -> dict:
         "std_dev": result.std_dev,
         "max": result.max,
         "min": result.min,
+        "atr": result.atr,
+        "bollinger_bands": {
+            "current": {
+                "upper": result.bollinger_current.upper,
+                "middle": result.bollinger_current.middle,
+                "lower": result.bollinger_current.lower,
+            } if result.bollinger_current else None,
+            "chart": [
+                {"upper": b.upper, "middle": b.middle, "lower": b.lower} if b else None
+                for b in result.bollinger_chart
+            ],
+        },
         "chart_data": [
             {"index": i + 1, "value": v} for i, v in enumerate(result.chart_data)
         ],
