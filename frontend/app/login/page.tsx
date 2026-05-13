@@ -8,13 +8,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL;
 function hasValidExpiration(token: string): boolean {
   try {
     const [, payload] = token.split(".");
-    if (!payload) {
-      return false;
-    }
+    if (!payload) return false;
     const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
     const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-    const json = atob(padded);
-    const parsed = JSON.parse(json) as { exp?: number };
+    const parsed = JSON.parse(atob(padded)) as { exp?: number };
     return typeof parsed.exp === "number" && parsed.exp * 1000 > Date.now();
   } catch {
     return false;
@@ -35,9 +32,7 @@ export default function LoginPage() {
       router.replace("/input");
       return;
     }
-    if (token) {
-      localStorage.removeItem("access_token");
-    }
+    if (token) localStorage.removeItem("access_token");
     setCheckingAuth(false);
   }, [router]);
 
@@ -63,7 +58,6 @@ export default function LoginPage() {
           setError("ユーザー名またはパスワードが正しくありません。");
           return;
         }
-
         try {
           const data: { detail?: string } = await response.json();
           setError(data.detail ?? "ログインに失敗しました。時間をおいて再度お試しください。");
@@ -84,44 +78,65 @@ export default function LoginPage() {
   };
 
   if (checkingAuth) {
-    return <main>読み込み中...</main>;
+    return (
+      <main className="flex items-center justify-center min-h-screen">
+        <p className="text-gray-400">読み込み中...</p>
+      </main>
+    );
   }
 
   return (
-    <main>
-      <h1>ログイン</h1>
-      <form onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="username">ユーザー名</label>
-          <input
-            id="username"
-            name="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            autoComplete="username"
-            required
-          />
-        </div>
+    <main className="flex items-center justify-center min-h-screen">
+      <div className="w-full max-w-sm bg-gray-900 rounded-2xl shadow-lg p-8 space-y-6">
+        <h1 className="text-2xl font-bold text-center text-white">ログイン</h1>
 
-        <div>
-          <label htmlFor="password">パスワード</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
-            required
-          />
-        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1">
+            <label htmlFor="username" className="block text-sm text-gray-400">
+              ユーザー名
+            </label>
+            <input
+              id="username"
+              name="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
 
-        {error && <p role="alert">{error}</p>}
+          <div className="space-y-1">
+            <label htmlFor="password" className="block text-sm text-gray-400">
+              パスワード
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
 
-        <button type="submit" disabled={loading}>
-          {loading ? "ログイン中..." : "ログイン"}
-        </button>
-      </form>
+          {error && (
+            <p role="alert" className="text-sm text-red-400 bg-red-900/30 border border-red-700 rounded-lg px-3 py-2">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
+          >
+            {loading ? "ログイン中..." : "ログイン"}
+          </button>
+        </form>
+      </div>
     </main>
   );
 }
