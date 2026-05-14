@@ -217,12 +217,14 @@ function multiplierBadgeClass(v: number): string {
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const [data, setData]     = useState<AnalysisData | null>(null);
-  const [error, setError]   = useState(false);
-  const [rounds, setRounds] = useState<Round[]>([]);
-  const [params, setParams] = useState<Params>(DEFAULT_PARAMS);
-  const [draft, setDraft]   = useState<Params>(DEFAULT_PARAMS);
+  type ChartTab = "prob" | "multiplier" | "rsi" | "macd";
+  const [data, setData]         = useState<AnalysisData | null>(null);
+  const [error, setError]       = useState(false);
+  const [rounds, setRounds]     = useState<Round[]>([]);
+  const [params, setParams]     = useState<Params>(DEFAULT_PARAMS);
+  const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
+  const [activeTab, setActiveTab] = useState<ChartTab>("prob");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paramsRef = useRef<Params>(params);
 
@@ -368,77 +370,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Probability transition */}
-      {data?.ready && data.prob_2x && data.prob_5x && data.prob_10x && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-300">確率遷移</h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span><span className="text-green-400 font-bold">■</span> 2x以上 {pct(data.prob_2x.current)}</span>
-              <span><span className="text-yellow-400 font-bold">■</span> 5x以上 {pct(data.prob_5x.current)}</span>
-              <span><span className="text-red-400 font-bold">■</span> 10x以上 {pct(data.prob_10x.current)}</span>
-            </div>
-          </div>
-          <ProbChart data={data} />
-        </section>
-      )}
-
-      {/* Multiplier + Bollinger */}
-      {data?.ready && data.chart_data && data.chart_data.length > 0 && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-300">倍率履歴（対数スケール）</h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span><span className="text-blue-400 font-bold">■</span> 倍率</span>
-              <span><span className="text-gray-400 font-bold">--</span> ボリンジャーバンド</span>
-            </div>
-          </div>
-          <MultiplierChart data={data} />
-        </section>
-      )}
-
-      {/* RSI */}
-      {data?.ready && data.rsi && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-300">RSI（{data.rsi.period}期間・移動平均ベース）</h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span className="text-red-400">── 70 過買い</span>
-              <span className="text-blue-400">── 30 過売り</span>
-              {data.rsi.current != null && (
-                <span className="text-purple-400 font-bold">現在 {data.rsi.current.toFixed(1)}</span>
-              )}
-            </div>
-          </div>
-          {data.rsi.chart.some((v) => v !== null)
-            ? <RsiChart rsi={data.rsi.chart} />
-            : <p className="text-sm text-gray-500 py-4 text-center">
-                データ不足（{rsiNeeded}件以上必要、現在 {data.total_rounds} 件）
-              </p>}
-        </section>
-      )}
-
-      {/* MACD */}
-      {data?.ready && data.macd && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-300">
-              MACD（{data.macd.fast}/{data.macd.slow}/{data.macd.signal_period}・移動平均ベース）
-            </h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span><span className="text-blue-400 font-bold">─</span> MACD</span>
-              <span><span className="text-yellow-400 font-bold">--</span> シグナル</span>
-              <span><span className="text-green-400 font-bold">■</span> ヒストグラム</span>
-            </div>
-          </div>
-          {data.macd.chart.some((p) => p !== null)
-            ? <MacdChart macd={data.macd.chart} />
-            : <p className="text-sm text-gray-500 py-4 text-center">
-                データ不足（{macdNeeded}件以上必要、現在 {data.total_rounds} 件）
-              </p>}
-        </section>
-      )}
-
       {/* Recommendation */}
       {data?.ready && data.recommendation && (() => {
         const rec = data.recommendation;
@@ -464,6 +395,96 @@ export default function Home() {
           </section>
         );
       })()}
+
+      {/* Charts with tab switcher */}
+      {data?.ready && (
+        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
+          {/* Tab bar */}
+          <div className="flex gap-1 border-b border-gray-700 pb-2">
+            {(
+              [
+                { key: "prob",       label: "確率遷移" },
+                { key: "multiplier", label: "倍率履歴" },
+                { key: "rsi",        label: "RSI" },
+                { key: "macd",       label: "MACD" },
+              ] as { key: ChartTab; label: string }[]
+            ).map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`px-3 py-1 text-xs rounded-t transition-colors ${
+                  activeTab === key
+                    ? "bg-gray-700 text-white font-semibold"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Probability */}
+          {activeTab === "prob" && data.prob_2x && data.prob_5x && data.prob_10x && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex gap-4 text-xs text-gray-400">
+                  <span><span className="text-green-400 font-bold">■</span> 2x以上 {pct(data.prob_2x.current)}</span>
+                  <span><span className="text-yellow-400 font-bold">■</span> 5x以上 {pct(data.prob_5x.current)}</span>
+                  <span><span className="text-red-400 font-bold">■</span> 10x以上 {pct(data.prob_10x.current)}</span>
+                </div>
+              </div>
+              <ProbChart data={data} />
+            </div>
+          )}
+
+          {/* Multiplier + Bollinger */}
+          {activeTab === "multiplier" && data.chart_data && data.chart_data.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-gray-400">
+                <span><span className="text-blue-400 font-bold">■</span> 倍率（対数スケール）</span>
+                <span><span className="text-gray-400 font-bold">--</span> ボリンジャーバンド</span>
+              </div>
+              <MultiplierChart data={data} />
+            </div>
+          )}
+
+          {/* RSI */}
+          {activeTab === "rsi" && data.rsi && (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-gray-400">
+                <span className="text-gray-300">{data.rsi.period}期間・移動平均ベース</span>
+                <span className="text-red-400">── 70 過買い</span>
+                <span className="text-blue-400">── 30 過売り</span>
+                {data.rsi.current != null && (
+                  <span className="text-purple-400 font-bold ml-auto">現在 {data.rsi.current.toFixed(1)}</span>
+                )}
+              </div>
+              {data.rsi.chart.some((v) => v !== null)
+                ? <RsiChart rsi={data.rsi.chart} />
+                : <p className="text-sm text-gray-500 py-8 text-center">
+                    データ不足（{rsiNeeded}件以上必要、現在 {data.total_rounds} 件）
+                  </p>}
+            </div>
+          )}
+
+          {/* MACD */}
+          {activeTab === "macd" && data.macd && (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-gray-400">
+                <span className="text-gray-300">{data.macd.fast}/{data.macd.slow}/{data.macd.signal_period}・移動平均ベース</span>
+                <span><span className="text-blue-400 font-bold">─</span> MACD</span>
+                <span><span className="text-yellow-400 font-bold">--</span> シグナル</span>
+                <span><span className="text-green-400 font-bold">■</span> ヒストグラム</span>
+              </div>
+              {data.macd.chart.some((p) => p !== null)
+                ? <MacdChart macd={data.macd.chart} />
+                : <p className="text-sm text-gray-500 py-8 text-center">
+                    データ不足（{macdNeeded}件以上必要、現在 {data.total_rounds} 件）
+                  </p>}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Metrics */}
       {data?.ready && (
