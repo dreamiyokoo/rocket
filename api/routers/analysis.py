@@ -92,6 +92,12 @@ def _build_response(result, analyzed_at: str) -> dict:
             "low_consecutive_count": result.no_entry.low_consecutive_count,
             "volatility_cv": result.no_entry.volatility_cv,
         } if result.no_entry else None,
+        "recommendation": {
+            "volatility_cv": result.recommendation.volatility_cv,
+            "regime": result.recommendation.regime,
+            "floor_line": result.recommendation.floor_line,
+            "target_line": result.recommendation.target_line,
+        } if result.recommendation else None,
         "analyzed_at": analyzed_at,
     }
 

@@ -43,6 +43,24 @@ class MacdPoint:
     histogram: float | None
 
 
+REGIME_THRESHOLDS = (0.3, 0.8)  # (low/medium boundary, medium/high boundary)
+
+# α for floor_line = median - α × std_dev
+_ALPHA = {"low": 0.5, "medium": 0.75, "high": 1.0}
+# β for target_line = mean + β × std_dev
+_BETA  = {"low": 1.0, "medium": 1.5,  "high": 2.0}
+
+FLOOR_LINE_MIN = 1.01  # recommendation lower bound (crash multiplier minimum payout is 1.01x)
+
+
+@dataclass
+class Recommendation:
+    volatility_cv: float
+    regime: str  # "low" | "medium" | "high"
+    floor_line: float
+    target_line: float
+
+
 @dataclass
 class NoEntry:
     active: bool
@@ -72,6 +90,7 @@ class AnalysisResult:
     macd_slow: int = MACD_SLOW_DEFAULT
     macd_signal_period: int = MACD_SIGNAL_DEFAULT
     macd_chart: list[MacdPoint | None] = field(default_factory=list)
+    recommendation: Recommendation | None = None
     no_entry: NoEntry | None = None
     history: list[WindowStats] = field(default_factory=list)
     chart_data: list[float] = field(default_factory=list)
@@ -177,6 +196,25 @@ def _macd_series(
             hist = round(m - s, 4) if s is not None else None
             result.append(MacdPoint(macd=m, signal=s, histogram=hist))
     return result
+
+
+def _recommendation(window: list[float]) -> Recommendation:
+    """Compute floor/target lines and volatility regime for the given window."""
+    mean = statistics.mean(window)
+    std  = statistics.stdev(window) if len(window) >= 2 else 0.0
+    cv_raw = (std / mean) if mean > 0 else 0.0
+    cv = round(cv_raw, 4)
+
+    if cv_raw < REGIME_THRESHOLDS[0]:
+        regime = "low"
+    elif cv_raw < REGIME_THRESHOLDS[1]:
+        regime = "medium"
+    else:
+        regime = "high"
+
+    floor_line = round(max(FLOOR_LINE_MIN, statistics.median(window) - _ALPHA[regime] * std), 4)
+    target_line = round(max(floor_line, mean + _BETA[regime] * std), 4)
+    return Recommendation(volatility_cv=cv, regime=regime, floor_line=floor_line, target_line=target_line)
 
 
 def _no_entry(multipliers: list[float], window: list[float]) -> NoEntry:
@@ -292,6 +330,7 @@ def calculate(
         macd_slow=macd_slow,
         macd_signal_period=macd_signal,
         macd_chart=macd_chart,
+        recommendation=_recommendation(recent),
         no_entry=_no_entry(multipliers, recent),
         history=history,
         chart_data=chart_data,
