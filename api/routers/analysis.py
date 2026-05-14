@@ -86,6 +86,12 @@ def _build_response(result, analyzed_at: str) -> dict:
         "chart_data": [
             {"index": i + 1, "value": v} for i, v in enumerate(result.chart_data)
         ],
+        "no_entry": {
+            "active": result.no_entry.active,
+            "reasons": result.no_entry.reasons,
+            "low_consecutive_count": result.no_entry.low_consecutive_count,
+            "volatility_cv": result.no_entry.volatility_cv,
+        } if result.no_entry else None,
         "analyzed_at": analyzed_at,
     }
 

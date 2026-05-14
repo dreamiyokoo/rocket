@@ -2,7 +2,17 @@ import statistics
 
 import pytest
 
-from analysis.calculator import WINDOW, AnalysisResult, calculate
+from analysis.calculator import (
+    NO_ENTRY_LOW_CONSECUTIVE_LIMIT,
+    NO_ENTRY_LOW_MULTIPLIER_THRESHOLD,
+    NO_ENTRY_LOW_VOLATILITY_CV,
+    NO_ENTRY_POST_SPIKE_AVG_MAX,
+    NO_ENTRY_POST_SPIKE_THRESHOLD,
+    NO_ENTRY_POST_SPIKE_WINDOW,
+    WINDOW,
+    AnalysisResult,
+    calculate,
+)
 
 
 def _make(values: list[float]) -> AnalysisResult:
@@ -109,3 +119,91 @@ def test_chart_data_capped_at_72():
 def test_chart_data_fewer_than_72():
     result = _make([1.5] * WINDOW)
     assert len(result.chart_data) == WINDOW
+
+
+# ---------- no_entry ----------
+
+def test_no_entry_none_when_not_ready():
+    result = _make([1.5] * (WINDOW - 1))
+    assert result.no_entry is None
+
+
+def test_no_entry_inactive_when_no_conditions():
+    # High variance, no streak at end, no spike pattern
+    data = [1.5] * 9 + [3.0] * 9
+    result = _make(data)
+    assert result.no_entry is not None
+    assert result.no_entry.active is False
+    assert result.no_entry.reasons == []
+
+
+def test_no_entry_low_consecutive_triggers_at_limit():
+    streak_len = NO_ENTRY_LOW_CONSECUTIVE_LIMIT
+    data = [2.0] * (WINDOW - streak_len) + [1.1] * streak_len
+    result = _make(data)
+    assert "low_consecutive" in result.no_entry.reasons
+    assert result.no_entry.active is True
+    assert result.no_entry.low_consecutive_count == streak_len
+
+
+def test_no_entry_low_consecutive_no_trigger_below_limit():
+    streak_len = NO_ENTRY_LOW_CONSECUTIVE_LIMIT - 1
+    data = [2.0] * (WINDOW - streak_len) + [1.1] * streak_len
+    result = _make(data)
+    assert "low_consecutive" not in result.no_entry.reasons
+    assert result.no_entry.low_consecutive_count == streak_len
+
+
+def test_no_entry_low_consecutive_boundary_value():
+    # Value exactly at threshold counts as low
+    data = [2.0] * (WINDOW - NO_ENTRY_LOW_CONSECUTIVE_LIMIT) + [NO_ENTRY_LOW_MULTIPLIER_THRESHOLD] * NO_ENTRY_LOW_CONSECUTIVE_LIMIT
+    result = _make(data)
+    assert "low_consecutive" in result.no_entry.reasons
+
+
+def test_no_entry_post_spike_triggers():
+    # spike at [-4] ≥ 10.0, post 3 values average < 1.3; streak = 3 < 5 so no low_consecutive
+    data = [2.0] * (WINDOW - NO_ENTRY_POST_SPIKE_WINDOW - 1) + [NO_ENTRY_POST_SPIKE_THRESHOLD] + [1.1] * NO_ENTRY_POST_SPIKE_WINDOW
+    assert len(data) == WINDOW
+    result = _make(data)
+    assert "post_spike" in result.no_entry.reasons
+    assert result.no_entry.active is True
+
+
+def test_no_entry_post_spike_no_trigger_spike_below_threshold():
+    below = NO_ENTRY_POST_SPIKE_THRESHOLD - 0.1
+    data = [2.0] * (WINDOW - NO_ENTRY_POST_SPIKE_WINDOW - 1) + [below] + [1.1] * NO_ENTRY_POST_SPIKE_WINDOW
+    result = _make(data)
+    assert "post_spike" not in result.no_entry.reasons
+
+
+def test_no_entry_post_spike_no_trigger_post_avg_at_ceiling():
+    # post average exactly at ceiling (not strictly less) → no trigger
+    data = [2.0] * (WINDOW - NO_ENTRY_POST_SPIKE_WINDOW - 1) + [NO_ENTRY_POST_SPIKE_THRESHOLD] + [NO_ENTRY_POST_SPIKE_AVG_MAX] * NO_ENTRY_POST_SPIKE_WINDOW
+    result = _make(data)
+    assert "post_spike" not in result.no_entry.reasons
+
+
+def test_no_entry_low_volatility_triggers():
+    # identical values → CV = 0 < 0.25
+    data = [2.0] * WINDOW
+    result = _make(data)
+    assert "low_volatility" in result.no_entry.reasons
+    assert result.no_entry.volatility_cv == pytest.approx(0.0)
+
+
+def test_no_entry_low_volatility_no_trigger_high_cv():
+    # [1.5]*9 + [3.0]*9 → CV ≈ 0.33 > 0.25
+    data = [1.5] * 9 + [3.0] * 9
+    result = _make(data)
+    assert "low_volatility" not in result.no_entry.reasons
+    assert result.no_entry.volatility_cv >= NO_ENTRY_LOW_VOLATILITY_CV
+
+
+def test_no_entry_multiple_reasons():
+    # all same low values → low_consecutive (streak = WINDOW ≥ 5) AND low_volatility (CV = 0)
+    data = [1.2] * WINDOW
+    result = _make(data)
+    assert "low_consecutive" in result.no_entry.reasons
+    assert "low_volatility" in result.no_entry.reasons
+    assert result.no_entry.active is True

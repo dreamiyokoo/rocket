@@ -11,6 +11,13 @@ const READY_THRESHOLD = 18;
 type BB = { upper: number; middle: number; lower: number };
 type MacdPoint = { macd: number; signal: number | null; histogram: number | null };
 
+type NoEntryData = {
+  active: boolean;
+  reasons: string[];
+  low_consecutive_count: number;
+  volatility_cv: number;
+};
+
 type AnalysisData = {
   ready: boolean;
   total_rounds: number;
@@ -28,6 +35,7 @@ type AnalysisData = {
   macd?: { fast: number; slow: number; signal_period: number; chart: (MacdPoint | null)[] };
   bollinger_bands?: { current: BB | null; chart: (BB | null)[] };
   chart_data?: { index: number; value: number }[];
+  no_entry?: NoEntryData;
   analyzed_at?: string;
 };
 
@@ -308,23 +316,47 @@ export default function Home() {
       {!data && !error && <p className="text-gray-400 text-sm">読み込み中...</p>}
       {error && <p className="text-red-400 text-sm">データ取得に失敗しました。</p>}
       {data && (
-        <div className="bg-gray-900 rounded-xl p-4 flex items-center gap-6">
-          <div>
-            <p className="text-xs text-gray-500">蓄積件数</p>
-            <p className="text-xl font-bold text-white">{data.total_rounds}<span className="text-sm text-gray-400 ml-1">rounds</span></p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500">状態</p>
-            {data.ready
-              ? <p className="text-green-400 font-semibold">分析中</p>
-              : <p className="text-yellow-400 font-semibold">あと {remaining} 件で分析開始</p>}
-          </div>
-          {data.ready && data.analyzed_at && (
-            <div className="ml-auto">
-              <p className="text-xs text-gray-600">最終更新</p>
-              <p className="text-xs text-gray-500">{new Date(data.analyzed_at).toLocaleTimeString("ja-JP")}</p>
+        <div className="bg-gray-900 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-6">
+            <div>
+              <p className="text-xs text-gray-500">蓄積件数</p>
+              <p className="text-xl font-bold text-white">{data.total_rounds}<span className="text-sm text-gray-400 ml-1">rounds</span></p>
             </div>
-          )}
+            <div>
+              <p className="text-xs text-gray-500">状態</p>
+              {data.ready
+                ? <p className="text-green-400 font-semibold">分析中</p>
+                : <p className="text-yellow-400 font-semibold">あと {remaining} 件で分析開始</p>}
+            </div>
+            {data.ready && data.analyzed_at && (
+              <div className="ml-auto">
+                <p className="text-xs text-gray-600">最終更新</p>
+                <p className="text-xs text-gray-500">{new Date(data.analyzed_at).toLocaleTimeString("ja-JP")}</p>
+              </div>
+            )}
+          </div>
+          {data.ready && data.no_entry && (() => {
+            const ne = data.no_entry;
+            const count = ne.reasons.length;
+            const { bg, label } = count === 0
+              ? { bg: "bg-green-700", label: "エントリー可" }
+              : count === 1
+              ? { bg: "bg-yellow-500 text-black", label: "注意" }
+              : { bg: "bg-red-600", label: "買い禁止" };
+            const reasonLabels: Record<string, string> = {
+              low_consecutive: `低倍率連続: ${ne.low_consecutive_count}回`,
+              post_spike:      "高倍率直後の調整帯",
+              low_volatility:  `低ボラ (CV ${ne.volatility_cv.toFixed(2)})`,
+            };
+            return (
+              <div className={`flex items-center gap-3 rounded-lg px-3 py-2 ${bg} ${count < 2 ? "" : "text-white"}`}>
+                <span className="font-bold text-sm">{label}</span>
+                {ne.reasons.map((r) => (
+                  <span key={r} className="text-xs opacity-80">{reasonLabels[r]}</span>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 
