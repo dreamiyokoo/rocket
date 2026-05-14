@@ -42,7 +42,7 @@ _ALPHA = {"low": 0.5, "medium": 0.75, "high": 1.0}
 # β for target_line = mean + β × std_dev
 _BETA  = {"low": 1.0, "medium": 1.5,  "high": 2.0}
 
-FLOOR_LINE_MIN = 1.01  # recommendation floor lower bound (input values can be lower)
+FLOOR_LINE_MIN = 1.01  # recommendation lower bound (crash multiplier minimum payout is 1.01x)
 
 
 @dataclass

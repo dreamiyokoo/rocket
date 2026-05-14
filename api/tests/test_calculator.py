@@ -155,7 +155,8 @@ def test_recommendation_high_volatility_regime():
 
 
 def test_recommendation_regime_uses_unrounded_cv():
-    # raw cv is just below 0.3 but rounds to 0.3000; regime should still be low
+    # mean≈0.6298, std≈0.1889 => raw cv≈0.29998 (rounds to 0.3000)
+    # regime must still be low because thresholding uses unrounded cv
     window = [0.5] * 12 + [0.8895] * 6
     rec = _recommendation(window)
     assert rec.volatility_cv == pytest.approx(0.3)
