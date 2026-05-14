@@ -50,8 +50,8 @@ async def post_rounds(
 
     try:
         await redis.delete(ANALYSIS_CACHE_KEY)
+        await redis.publish("analysis:trigger", "update")
     except RedisError:
-        # Cache invalidation failures must not break successful writes.
         pass
 
     return {"inserted": len(body.values), "total": total, "ready": total >= READY_THRESHOLD}
@@ -89,8 +89,8 @@ async def delete_rounds(
 
     try:
         await redis.delete(ANALYSIS_CACHE_KEY)
+        await redis.publish("analysis:trigger", "update")
     except RedisError:
-        # Cache invalidation failures must not break successful writes.
         pass
 
     return {"deleted": deleted}

@@ -221,10 +221,17 @@ export default function Home() {
     fetchData(params);
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => fetchData(params), POLL_INTERVAL);
+
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`);
+    ws.onmessage = () => fetchData(params);
+
     const ch = new BroadcastChannel("rocket:data-changed");
     ch.onmessage = () => fetchData(params);
+
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      ws.close();
       ch.close();
     };
   }, [params, fetchData]);
