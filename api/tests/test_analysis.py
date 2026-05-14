@@ -78,6 +78,27 @@ class TestGetAnalysis:
         assert "target_line" in data["recommendation"]
         assert "analyzed_at" in data
 
+    def test_ready_true_no_entry_shape(self):
+        values = [2.0] * WINDOW
+        app.dependency_overrides[get_db] = lambda: _make_db(values)
+        app.dependency_overrides[get_redis] = lambda: _make_redis()
+        data = TestClient(app).get("/api/v1/analysis").json()
+        assert data["ready"] is True
+        assert "no_entry" in data
+        ne = data["no_entry"]
+        assert isinstance(ne["active"], bool)
+        assert isinstance(ne["reasons"], list)
+        assert isinstance(ne["low_consecutive_count"], int)
+        assert isinstance(ne["volatility_cv"], float)
+        assert isinstance(ne["median_value"], float)
+
+    def test_ready_false_no_entry_absent(self):
+        app.dependency_overrides[get_db] = lambda: _make_db([1.5] * (WINDOW - 1))
+        app.dependency_overrides[get_redis] = lambda: _make_redis()
+        data = TestClient(app).get("/api/v1/analysis").json()
+        assert data["ready"] is False
+        assert "no_entry" not in data
+
     def test_chart_data_max_72(self):
         values = [1.5] * 100
         app.dependency_overrides[get_db] = lambda: _make_db(values)

@@ -18,9 +18,11 @@ type Recommendation = {
   target_line: number;
 };
 
+type NoEntryReason = "low_consecutive" | "post_spike" | "low_volatility" | "low_expected_value";
+
 type NoEntryData = {
   active: boolean;
-  reasons: string[];
+  reasons: NoEntryReason[];
   low_consecutive_count: number;
   volatility_cv: number;
   median_value: number;
@@ -386,7 +388,7 @@ export default function Home() {
             ];
             return (
               <div className="space-y-2">
-                <div className={`flex items-center gap-3 rounded-lg px-3 py-2 ${bg} ${count < 2 ? "" : "text-white"}`}>
+              <div role="status" className={`flex flex-wrap items-center gap-3 rounded-lg px-3 py-2 ${bg} ${count < 2 ? "" : "text-white"}`}>
                   <span className="font-bold text-sm">{label}</span>
                   {ne.reasons.map((r) => (
                     <span key={r} className="text-xs opacity-80">

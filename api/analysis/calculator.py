@@ -233,7 +233,7 @@ def _no_entry(multipliers: list[float], window: list[float]) -> NoEntry:
     if streak >= NO_ENTRY_LOW_CONSECUTIVE_LIMIT:
         reasons.append("low_consecutive")
 
-    # ② Post-spike cooldown: last value was a spike AND next few avg low
+    # ② Post-spike cooldown: value just before the trailing window was a spike AND the trailing post-spike avg is low
     if len(multipliers) >= NO_ENTRY_POST_SPIKE_WINDOW + 1:
         spike_candidate = multipliers[-(NO_ENTRY_POST_SPIKE_WINDOW + 1)]
         post_values = multipliers[-NO_ENTRY_POST_SPIKE_WINDOW:]
@@ -244,8 +244,9 @@ def _no_entry(multipliers: list[float], window: list[float]) -> NoEntry:
     # ③ Low volatility (CV)
     mean = statistics.mean(window)
     std  = statistics.stdev(window) if len(window) >= 2 else 0.0
-    cv   = round(std / mean, 4) if mean > 0 else 0.0
-    if cv < NO_ENTRY_LOW_VOLATILITY_CV:
+    cv_raw = (std / mean) if mean > 0 else 0.0
+    cv   = round(cv_raw, 4)
+    if cv_raw < NO_ENTRY_LOW_VOLATILITY_CV:
         reasons.append("low_volatility")
 
     # ④ Low expected value (median)
