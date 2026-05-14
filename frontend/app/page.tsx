@@ -11,6 +11,13 @@ const READY_THRESHOLD = 18;
 type BB = { upper: number; middle: number; lower: number };
 type MacdPoint = { macd: number; signal: number | null; histogram: number | null };
 
+type Recommendation = {
+  volatility_cv: number;
+  regime: "low" | "medium" | "high";
+  floor_line: number;
+  target_line: number;
+};
+
 type AnalysisData = {
   ready: boolean;
   total_rounds: number;
@@ -28,6 +35,7 @@ type AnalysisData = {
   macd?: { fast: number; slow: number; signal_period: number; chart: (MacdPoint | null)[] };
   bollinger_bands?: { current: BB | null; chart: (BB | null)[] };
   chart_data?: { index: number; value: number }[];
+  recommendation?: Recommendation;
   analyzed_at?: string;
 };
 
@@ -398,6 +406,32 @@ export default function Home() {
               </p>}
         </section>
       )}
+
+      {/* Recommendation */}
+      {data?.ready && data.recommendation && (() => {
+        const rec = data.recommendation;
+        const regimeLabel = { low: "低ボラ", medium: "中ボラ", high: "高ボラ" }[rec.regime];
+        const regimeColor = { low: "bg-blue-700 text-white", medium: "bg-yellow-500 text-black", high: "bg-red-600 text-white" }[rec.regime];
+        return (
+          <section className="bg-gray-900 rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-semibold text-gray-300">推奨ライン</h2>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded ${regimeColor}`}>{regimeLabel}</span>
+              <span className="text-xs text-gray-500 ml-auto">CV {rec.volatility_cv.toFixed(2)}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-800 rounded-lg p-3">
+                <p className="text-xs text-gray-500">下限ライン（損失最小化）</p>
+                <p className="text-2xl font-bold text-blue-400">{fmt(rec.floor_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
+              </div>
+              <div className="bg-gray-800 rounded-lg p-3">
+                <p className="text-xs text-gray-500">利確ライン（利益最大化）</p>
+                <p className="text-2xl font-bold text-green-400">{fmt(rec.target_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
 
       {/* Metrics */}
       {data?.ready && (

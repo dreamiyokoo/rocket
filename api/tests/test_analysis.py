@@ -60,6 +60,7 @@ class TestGetAnalysis:
         assert data["window"] == WINDOW
         assert "chart_data" not in data
         assert "prob_2x" not in data
+        assert "recommendation" not in data
 
     def test_ready_true_returns_all_fields(self):
         values = [2.0] * WINDOW
@@ -71,6 +72,10 @@ class TestGetAnalysis:
         assert "prob_2x" in data
         assert "history" in data["prob_2x"]
         assert "current" in data["prob_2x"]
+        assert "recommendation" in data
+        assert data["recommendation"]["regime"] in ("low", "medium", "high")
+        assert "floor_line" in data["recommendation"]
+        assert "target_line" in data["recommendation"]
         assert "analyzed_at" in data
 
     def test_chart_data_max_72(self):

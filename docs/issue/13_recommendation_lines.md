@@ -83,12 +83,12 @@ target_line = mean(直近 N 件) + β × std_dev(直近 N 件)
 
 ## 受け入れ条件
 
-- [ ] `volatility_cv` と `regime` が正しく算出される
-- [ ] `floor_line` が regime に応じた α で計算され、1.01 以上にクリップされる
-- [ ] `target_line` が regime に応じた β で計算される
-- [ ] `ready: false` の場合 `recommendation` フィールドが含まれない
-- [ ] 分析ページに下限ライン・利確ライン・regime バッジが表示される
-- [ ] 単体テストが存在する
+- [x] `volatility_cv` と `regime` が正しく算出される
+- [x] `floor_line` が regime に応じた α で計算され、1.01 以上にクリップされる
+- [x] `target_line` が regime に応じた β で計算される
+- [x] `ready: false` の場合 `recommendation` フィールドが含まれない
+- [x] 分析ページに下限ライン・利確ライン・regime バッジが表示される
+- [x] 単体テストが存在する
 
 ## 技術メモ
 
