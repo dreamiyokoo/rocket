@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ACCESS_TOKEN_KEY, getValidAccessToken } from "../lib/auth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,11 +29,6 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      if (!API_URL) {
-        setError("API接続先が設定されていません。");
-        return;
-      }
-
       const response = await fetch(`${API_URL}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

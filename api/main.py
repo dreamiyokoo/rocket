@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers.analysis import router as analysis_router
 from routers.auth import router as auth_router
 from routers.rounds import router as rounds_router
+from routers.ws import router as ws_router
 
 app = FastAPI(title="Rocket API")
 
@@ -20,6 +21,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(rounds_router)
 app.include_router(analysis_router)
+app.include_router(ws_router)
 
 
 @app.get("/api/v1/health")

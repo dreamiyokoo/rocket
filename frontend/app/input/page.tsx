@@ -1,10 +1,10 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearAccessToken, getValidAccessToken } from "../lib/auth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const READY_THRESHOLD = 18;
 
 function multiplierBadgeClass(v: number): string {
@@ -27,6 +27,12 @@ export default function InputPage() {
   const [resetting, setResetting] = useState(false);
   const [status, setStatus] = useState<AnalysisStatus>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
+  const broadcastRef = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    broadcastRef.current = new BroadcastChannel("rocket:data-changed");
+    return () => { broadcastRef.current?.close(); };
+  }, []);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -39,7 +45,6 @@ export default function InputPage() {
   }, [router]);
 
   const fetchStatus = useCallback(async () => {
-    if (!API_URL) return;
     try {
       const res = await fetch(`${API_URL}/api/v1/analysis`);
       if (!res.ok) return;
@@ -51,7 +56,6 @@ export default function InputPage() {
   }, []);
 
   const fetchRounds = useCallback(async () => {
-    if (!API_URL) return;
     try {
       const res = await fetch(`${API_URL}/api/v1/rounds?limit=72`);
       if (!res.ok) return;
@@ -66,12 +70,6 @@ export default function InputPage() {
     const token = getValidAccessToken();
     if (!token) {
       router.replace("/login");
-      return;
-    }
-    if (!API_URL) {
-      setCheckingAuth(false);
-      setToast({ message: "API接続先が設定されていません。", type: "error" });
-      setTimeout(() => setToast(null), 3000);
       return;
     }
     setCheckingAuth(false);
@@ -102,11 +100,6 @@ export default function InputPage() {
       return;
     }
 
-    if (!API_URL) {
-      showToast("API接続先が設定されていません。", "error");
-      return;
-    }
-
     const token = getValidAccessToken();
     if (!token) { router.replace("/login"); return; }
 
@@ -127,6 +120,7 @@ export default function InputPage() {
       }
       setText("");
       showToast(`${parsed.values.length}件を送信しました。`, "success");
+      broadcastRef.current?.postMessage("update");
       await Promise.all([fetchStatus(), fetchRounds()]);
     } catch {
       showToast("送信に失敗しました。", "error");
@@ -137,11 +131,6 @@ export default function InputPage() {
 
   const handleReset = async () => {
     if (!confirm("全データを削除します。よろしいですか？")) return;
-
-    if (!API_URL) {
-      showToast("API接続先が設定されていません。", "error");
-      return;
-    }
 
     const token = getValidAccessToken();
     if (!token) { router.replace("/login"); return; }
@@ -161,6 +150,7 @@ export default function InputPage() {
         return;
       }
       showToast("全データを削除しました。", "success");
+      broadcastRef.current?.postMessage("update");
       setStatus({ total_rounds: 0, ready: false });
       setRounds([]);
     } catch {
@@ -171,11 +161,6 @@ export default function InputPage() {
   };
 
   const handleLogout = async () => {
-    if (!API_URL) {
-      showToast("API接続先が設定されていません。", "error");
-      return;
-    }
-
     const token = getValidAccessToken();
     if (token) {
       try {
