@@ -283,17 +283,15 @@ def test_no_entry_low_volatility_no_trigger_high_cv():
 
 
 def test_no_entry_low_volatility_no_trigger_at_threshold():
-    # CV exactly == 0.25 → strict < means no trigger
-    # Build data so std/mean == 0.25. With mean=2, std=0.5 we get CV=0.25.
-    # Use values that give mean≈2, std≈0.5: [1.5]*9 + [2.5]*9
+    # CV at or above the threshold (0.25) must NOT trigger due to strict <.
+    # [1.5]*9 + [2.5]*9 gives CV ≈ 0.257 which is >= 0.25.
     data = [1.5] * 9 + [2.5] * 9
     cv_raw = statistics.stdev(data) / statistics.mean(data)
+    assert cv_raw >= NO_ENTRY_LOW_VOLATILITY_CV, (
+        f"Test data must produce CV >= {NO_ENTRY_LOW_VOLATILITY_CV}, got {cv_raw}"
+    )
     result = _make(data)
-    if cv_raw == NO_ENTRY_LOW_VOLATILITY_CV:
-        assert "low_volatility" not in result.no_entry.reasons
-    else:
-        # Confirm the test helper produces the right CV direction
-        assert cv_raw >= NO_ENTRY_LOW_VOLATILITY_CV or "low_volatility" in result.no_entry.reasons
+    assert "low_volatility" not in result.no_entry.reasons
 
 
 def test_no_entry_low_volatility_triggers_just_below_threshold():
