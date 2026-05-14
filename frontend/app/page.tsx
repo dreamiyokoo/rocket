@@ -23,6 +23,7 @@ type NoEntryData = {
   reasons: string[];
   low_consecutive_count: number;
   volatility_cv: number;
+  median_value: number;
 };
 
 type AnalysisData = {
@@ -353,17 +354,60 @@ export default function Home() {
               : count === 1
               ? { bg: "bg-yellow-500 text-black", label: "注意" }
               : { bg: "bg-red-600", label: "買い禁止" };
-            const reasonLabels: Record<string, string> = {
-              low_consecutive: `低倍率連続: ${ne.low_consecutive_count}回`,
-              post_spike:      "高倍率直後の調整帯",
-              low_volatility:  `低ボラ (CV ${ne.volatility_cv.toFixed(2)})`,
-            };
+            const conditions: { key: string; label: string; value: string; threshold: string; triggered: boolean }[] = [
+              {
+                key: "low_consecutive",
+                label: "① 低倍率連続",
+                value: `${ne.low_consecutive_count}連続`,
+                threshold: "5連続以上で発動",
+                triggered: ne.reasons.includes("low_consecutive"),
+              },
+              {
+                key: "post_spike",
+                label: "② 高倍率後調整",
+                value: ne.reasons.includes("post_spike") ? "検出" : "なし",
+                threshold: "10x直後に3件平均<1.3で発動",
+                triggered: ne.reasons.includes("post_spike"),
+              },
+              {
+                key: "low_volatility",
+                label: "③ 低ボラティリティ",
+                value: `CV ${ne.volatility_cv.toFixed(2)}`,
+                threshold: "CV 0.25未満で発動",
+                triggered: ne.reasons.includes("low_volatility"),
+              },
+              {
+                key: "low_expected_value",
+                label: "④ 期待値不足",
+                value: `中央値 ${ne.median_value.toFixed(2)}x`,
+                threshold: "中央値 1.50x未満で発動",
+                triggered: ne.reasons.includes("low_expected_value"),
+              },
+            ];
             return (
-              <div className={`flex items-center gap-3 rounded-lg px-3 py-2 ${bg} ${count < 2 ? "" : "text-white"}`}>
-                <span className="font-bold text-sm">{label}</span>
-                {ne.reasons.map((r) => (
-                  <span key={r} className="text-xs opacity-80">{reasonLabels[r]}</span>
-                ))}
+              <div className="space-y-2">
+                <div className={`flex items-center gap-3 rounded-lg px-3 py-2 ${bg} ${count < 2 ? "" : "text-white"}`}>
+                  <span className="font-bold text-sm">{label}</span>
+                  {ne.reasons.map((r) => (
+                    <span key={r} className="text-xs opacity-80">
+                      {conditions.find((c) => c.key === r)?.label}
+                    </span>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  {conditions.map((c) => (
+                    <div key={c.key} className={`flex items-start gap-2 rounded px-2 py-1.5 text-xs ${c.triggered ? "bg-red-950 border border-red-800" : "bg-gray-800"}`}>
+                      <span className={`mt-0.5 shrink-0 ${c.triggered ? "text-red-400" : "text-green-500"}`}>
+                        {c.triggered ? "✗" : "✓"}
+                      </span>
+                      <div className="min-w-0">
+                        <p className={`font-semibold ${c.triggered ? "text-red-300" : "text-gray-300"}`}>{c.label}</p>
+                        <p className={`font-mono ${c.triggered ? "text-red-200" : "text-white"}`}>{c.value}</p>
+                        <p className="text-gray-500">{c.threshold}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             );
           })()}

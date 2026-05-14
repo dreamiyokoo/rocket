@@ -5,6 +5,7 @@ import pytest
 from analysis.calculator import (
     FLOOR_LINE_MIN,
     NO_ENTRY_LOW_CONSECUTIVE_LIMIT,
+    NO_ENTRY_LOW_EV_MEDIAN_THRESHOLD,
     NO_ENTRY_LOW_MULTIPLIER_THRESHOLD,
     NO_ENTRY_LOW_VOLATILITY_CV,
     NO_ENTRY_POST_SPIKE_AVG_MAX,
@@ -288,3 +289,35 @@ def test_no_entry_multiple_reasons():
     assert "low_consecutive" in result.no_entry.reasons
     assert "low_volatility" in result.no_entry.reasons
     assert result.no_entry.active is True
+
+
+def test_no_entry_low_ev_triggers_below_threshold():
+    # median < 1.50 → low_expected_value
+    data = [1.1] * 9 + [1.4] * 9  # median = 1.25 < 1.50
+    result = _make(data)
+    assert "low_expected_value" in result.no_entry.reasons
+    assert result.no_entry.active is True
+    assert result.no_entry.median_value == pytest.approx(1.25)
+
+
+def test_no_entry_low_ev_no_trigger_at_threshold():
+    # median exactly at threshold → no trigger (strictly less than)
+    data = [NO_ENTRY_LOW_EV_MEDIAN_THRESHOLD] * WINDOW
+    result = _make(data)
+    assert "low_expected_value" not in result.no_entry.reasons
+
+
+def test_no_entry_low_ev_no_trigger_above_threshold():
+    # median > 1.50 → no trigger
+    data = [2.0] * 9 + [3.0] * 9  # median = 2.5
+    result = _make(data)
+    assert "low_expected_value" not in result.no_entry.reasons
+    assert result.no_entry.median_value == pytest.approx(2.5)
+
+
+def test_no_entry_median_value_exposed():
+    # median_value is always present in no_entry when ready
+    data = [1.5] * 9 + [3.0] * 9
+    result = _make(data)
+    assert result.no_entry is not None
+    assert isinstance(result.no_entry.median_value, float)

@@ -91,6 +91,7 @@ def _build_response(result, analyzed_at: str) -> dict:
             "reasons": result.no_entry.reasons,
             "low_consecutive_count": result.no_entry.low_consecutive_count,
             "volatility_cv": result.no_entry.volatility_cv,
+            "median_value": result.no_entry.median_value,
         } if result.no_entry else None,
         "recommendation": {
             "volatility_cv": result.recommendation.volatility_cv,

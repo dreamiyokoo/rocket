@@ -19,6 +19,7 @@ NO_ENTRY_POST_SPIKE_THRESHOLD     = 10.0  # condition ②: "spike" definition
 NO_ENTRY_POST_SPIKE_AVG_MAX       = 1.30  # condition ②: post-spike avg ceiling
 NO_ENTRY_POST_SPIKE_WINDOW        = 3     # condition ②: how many post-spike values to average
 NO_ENTRY_LOW_VOLATILITY_CV        = 0.25  # condition ③: CV below this → low vol
+NO_ENTRY_LOW_EV_MEDIAN_THRESHOLD  = 1.50  # condition ④: median below this → low EV
 
 
 @dataclass
@@ -67,6 +68,7 @@ class NoEntry:
     reasons: list[str]
     low_consecutive_count: int
     volatility_cv: float
+    median_value: float
 
 
 @dataclass
@@ -246,11 +248,17 @@ def _no_entry(multipliers: list[float], window: list[float]) -> NoEntry:
     if cv < NO_ENTRY_LOW_VOLATILITY_CV:
         reasons.append("low_volatility")
 
+    # ④ Low expected value (median)
+    median_val = round(statistics.median(window), 4)
+    if median_val < NO_ENTRY_LOW_EV_MEDIAN_THRESHOLD:
+        reasons.append("low_expected_value")
+
     return NoEntry(
         active=len(reasons) > 0,
         reasons=reasons,
         low_consecutive_count=streak,
         volatility_cv=cv,
+        median_value=median_val,
     )
 
 
