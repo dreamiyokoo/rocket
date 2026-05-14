@@ -98,6 +98,20 @@ def _build_response(result, analyzed_at: str) -> dict:
             "regime": result.recommendation.regime,
             "floor_line": result.recommendation.floor_line,
             "target_line": result.recommendation.target_line,
+            "flow_state": (
+                "hot" if (result.prob_2x or 0) >= 0.60
+                else "warm" if (result.prob_2x or 0) >= 0.50
+                else "cold"
+            ),
+            "stake_scale": (
+                1.5 if (result.prob_2x or 0) >= 0.60
+                else 1.0 if (result.prob_2x or 0) >= 0.40
+                else 0.5
+            ),
+            "entry_ok": (
+                not (result.no_entry.active if result.no_entry else False)
+                and (result.prob_2x or 0) >= 0.50
+            ),
         } if result.recommendation else None,
         "analyzed_at": analyzed_at,
     }

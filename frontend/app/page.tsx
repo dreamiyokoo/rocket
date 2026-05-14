@@ -16,6 +16,9 @@ type Recommendation = {
   regime: "low" | "medium" | "high";
   floor_line: number;
   target_line: number;
+  flow_state: "hot" | "warm" | "cold";
+  stake_scale: 0.5 | 1.0 | 1.5;
+  entry_ok: boolean;
 };
 
 type NoEntryReason = "low_consecutive" | "post_spike" | "low_volatility" | "low_expected_value";
@@ -421,13 +424,51 @@ export default function Home() {
         const rec = data.recommendation;
         const regimeLabel = { low: "低ボラ", medium: "中ボラ", high: "高ボラ" }[rec.regime];
         const regimeColor = { low: "bg-blue-700 text-white", medium: "bg-yellow-500 text-black", high: "bg-red-600 text-white" }[rec.regime];
+        const flowLabel = { hot: "🔥 HOT", warm: "流れあり", cold: "❄ COLD" }[rec.flow_state];
+        const flowColor = { hot: "bg-orange-500 text-white", warm: "bg-green-600 text-white", cold: "bg-gray-600 text-white" }[rec.flow_state];
+        const scaleLabel = { 1.5: "1.5倍増額", 1.0: "通常", 0.5: "0.5倍減額" }[rec.stake_scale];
+        const prob2x = data.prob_2x?.current ?? 0;
         return (
           <section className="bg-gray-900 rounded-xl p-4 space-y-3">
             <div className="flex items-center gap-3">
               <h2 className="text-sm font-semibold text-gray-300">推奨ライン</h2>
               <span className={`text-xs font-bold px-2 py-0.5 rounded ${regimeColor}`}>{regimeLabel}</span>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded ${flowColor}`}>{flowLabel}</span>
               <span className="text-xs text-gray-500 ml-auto">CV {rec.volatility_cv.toFixed(2)}</span>
             </div>
+
+            {/* Bet advice banner */}
+            <div className={`rounded-lg px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 ${
+              rec.entry_ok ? "bg-green-900 border border-green-700" : "bg-gray-800 border border-gray-700"
+            }`}>
+              <div className="flex items-center gap-2">
+                <span className={`text-lg font-bold ${ rec.entry_ok ? "text-green-300" : "text-gray-400" }`}>
+                  {rec.entry_ok ? "✅ エントリー推奨" : "⏸ 待機"}
+                </span>
+              </div>
+              {rec.entry_ok && (
+                <div className="flex flex-wrap gap-3 sm:ml-auto">
+                  <div className="text-center">
+                    <p className="text-xs text-gray-400">Bet1</p>
+                    <p className="text-sm font-bold text-white">{Math.round(100 * rec.stake_scale)}コイン <span className="text-green-400">@ 2.0x</span></p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-400">Bet2</p>
+                    <p className="text-sm font-bold text-white">{Math.round(50 * rec.stake_scale)}コイン <span className="text-green-400">@ 3.5x</span></p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-400">賭け額</p>
+                    <p className={`text-sm font-bold ${ rec.stake_scale === 1.5 ? "text-orange-400" : rec.stake_scale === 0.5 ? "text-blue-400" : "text-white" }`}>{scaleLabel}</p>
+                  </div>
+                </div>
+              )}
+              {!rec.entry_ok && (
+                <p className="text-xs text-gray-500 sm:ml-auto">
+                  {data.no_entry?.active ? "No-Entryゾーン発動中" : `流れ不足（2x到達率 ${(prob2x * 100).toFixed(0)}% < 50%）`}
+                </p>
+              )}
+            </div>
+
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-gray-800 rounded-lg p-3 space-y-1">
                 <p className="text-xs font-semibold text-blue-400">下限ライン</p>
