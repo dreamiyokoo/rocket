@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearAccessToken, getValidAccessToken } from "../lib/auth";
 
@@ -27,6 +27,12 @@ export default function InputPage() {
   const [resetting, setResetting] = useState(false);
   const [status, setStatus] = useState<AnalysisStatus>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
+  const broadcastRef = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    broadcastRef.current = new BroadcastChannel("rocket:data-changed");
+    return () => { broadcastRef.current?.close(); };
+  }, []);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -114,7 +120,7 @@ export default function InputPage() {
       }
       setText("");
       showToast(`${parsed.values.length}件を送信しました。`, "success");
-      new BroadcastChannel("rocket:data-changed").postMessage("update");
+      broadcastRef.current?.postMessage("update");
       await Promise.all([fetchStatus(), fetchRounds()]);
     } catch {
       showToast("送信に失敗しました。", "error");
@@ -144,7 +150,7 @@ export default function InputPage() {
         return;
       }
       showToast("全データを削除しました。", "success");
-      new BroadcastChannel("rocket:data-changed").postMessage("update");
+      broadcastRef.current?.postMessage("update");
       setStatus({ total_rounds: 0, ready: false });
       setRounds([]);
     } catch {

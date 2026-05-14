@@ -208,6 +208,9 @@ export default function Home() {
   const [draft, setDraft]   = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const paramsRef = useRef<Params>(params);
+
+  useEffect(() => { paramsRef.current = params; }, [params]);
 
   const fetchRounds = useCallback(async () => {
     try {
@@ -240,20 +243,22 @@ export default function Home() {
     fetchRounds();
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => { fetchData(params); fetchRounds(); }, POLL_INTERVAL);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [params, fetchData, fetchRounds]);
 
+  useEffect(() => {
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`);
-    ws.onmessage = () => { fetchData(params); fetchRounds(); };
+    ws.onmessage = () => { fetchData(paramsRef.current); fetchRounds(); };
 
     const ch = new BroadcastChannel("rocket:data-changed");
-    ch.onmessage = () => { fetchData(params); fetchRounds(); };
+    ch.onmessage = () => { fetchData(paramsRef.current); fetchRounds(); };
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
       ws.close();
       ch.close();
     };
-  }, [params, fetchData, fetchRounds]);
+  }, [fetchData, fetchRounds]);
 
   const applySettings = () => {
     setParams(draft);

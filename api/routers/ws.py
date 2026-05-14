@@ -1,9 +1,12 @@
+import logging
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from redis.exceptions import RedisError
 
 from core.redis import get_redis
 
 router = APIRouter(prefix="/api/v1", tags=["websocket"])
+logger = logging.getLogger(__name__)
 
 
 @router.websocket("/ws")
@@ -23,5 +26,5 @@ async def websocket_endpoint(websocket: WebSocket):
             await pubsub.unsubscribe("analysis:trigger")
             await pubsub.aclose()
             await redis.aclose()
-        except Exception:
-            pass
+        except RedisError as exc:
+            logger.warning("WebSocket cleanup error: %s", exc)
