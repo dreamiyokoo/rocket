@@ -114,6 +114,7 @@ export default function InputPage() {
       }
       setText("");
       showToast(`${parsed.values.length}件を送信しました。`, "success");
+      new BroadcastChannel("rocket:data-changed").postMessage("update");
       await Promise.all([fetchStatus(), fetchRounds()]);
     } catch {
       showToast("送信に失敗しました。", "error");
@@ -143,6 +144,7 @@ export default function InputPage() {
         return;
       }
       showToast("全データを削除しました。", "success");
+      new BroadcastChannel("rocket:data-changed").postMessage("update");
       setStatus({ total_rounds: 0, ready: false });
       setRounds([]);
     } catch {

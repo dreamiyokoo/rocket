@@ -221,7 +221,12 @@ export default function Home() {
     fetchData(params);
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => fetchData(params), POLL_INTERVAL);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    const ch = new BroadcastChannel("rocket:data-changed");
+    ch.onmessage = () => fetchData(params);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      ch.close();
+    };
   }, [params, fetchData]);
 
   const applySettings = () => {
