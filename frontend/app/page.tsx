@@ -32,6 +32,7 @@ type AnalysisData = {
 };
 
 type Params = { rsi_period: number; macd_fast: number; macd_slow: number; macd_signal: number };
+type Round = { id: number; multiplier: number; recorded_at: string };
 
 const DEFAULT_PARAMS: Params = { rsi_period: 14, macd_fast: 12, macd_slow: 26, macd_signal: 9 };
 
@@ -190,15 +191,32 @@ function NumInput({ label, value, min, max, onChange }: {
   );
 }
 
+function multiplierBadgeClass(v: number): string {
+  if (v >= 10) return "bg-red-700 text-white";
+  if (v >= 5)  return "bg-yellow-500 text-black";
+  if (v >= 2)  return "bg-green-600 text-white";
+  return "bg-blue-600 text-white";
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
   const [data, setData]     = useState<AnalysisData | null>(null);
   const [error, setError]   = useState(false);
+  const [rounds, setRounds] = useState<Round[]>([]);
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS);
   const [draft, setDraft]   = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchRounds = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/rounds`);
+      if (!res.ok) return;
+      const json = await res.json() as { rounds: Round[] };
+      setRounds(json.rounds);
+    } catch { /* best-effort */ }
+  }, []);
 
   const fetchData = useCallback(async (p: Params) => {
     try {
@@ -219,22 +237,23 @@ export default function Home() {
 
   useEffect(() => {
     fetchData(params);
+    fetchRounds();
     if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => fetchData(params), POLL_INTERVAL);
+    timerRef.current = setInterval(() => { fetchData(params); fetchRounds(); }, POLL_INTERVAL);
 
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`);
-    ws.onmessage = () => fetchData(params);
+    ws.onmessage = () => { fetchData(params); fetchRounds(); };
 
     const ch = new BroadcastChannel("rocket:data-changed");
-    ch.onmessage = () => fetchData(params);
+    ch.onmessage = () => { fetchData(params); fetchRounds(); };
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       ws.close();
       ch.close();
     };
-  }, [params, fetchData]);
+  }, [params, fetchData, fetchRounds]);
 
   const applySettings = () => {
     setParams(draft);
@@ -393,6 +412,29 @@ export default function Home() {
               <p className="text-lg font-bold text-white">{value}</p>
             </div>
           ))}
+        </section>
+      )}
+
+      {/* Round history */}
+      {rounds.length > 0 && (
+        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-gray-300">入力履歴（新しい順）</h2>
+          <div className="grid grid-cols-6 gap-2">
+            {rounds.map((r) => (
+              <span
+                key={r.id}
+                className={`px-2 py-0.5 rounded text-xs font-mono font-semibold text-center ${multiplierBadgeClass(r.multiplier)}`}
+              >
+                {r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-3 text-xs text-gray-600">
+            <span><span className="inline-block w-2 h-2 rounded-sm bg-blue-600 mr-1"/>1x台</span>
+            <span><span className="inline-block w-2 h-2 rounded-sm bg-green-600 mr-1"/>2x以上</span>
+            <span><span className="inline-block w-2 h-2 rounded-sm bg-yellow-500 mr-1"/>5x以上</span>
+            <span><span className="inline-block w-2 h-2 rounded-sm bg-red-700 mr-1"/>10x以上</span>
+          </div>
         </section>
       )}
     </main>
