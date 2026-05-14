@@ -49,8 +49,9 @@ async def post_rounds(
     total = total_row.scalar()
 
     try:
-        # Cache invalidation and pub/sub failures must not break successful writes.
-        await redis.delete(ANALYSIS_CACHE_KEY)
+        keys = await redis.keys(f"{ANALYSIS_CACHE_KEY}:*")
+        if keys:
+            await redis.delete(*keys)
         await redis.publish("analysis:trigger", "update")
     except RedisError:
         pass
@@ -89,8 +90,9 @@ async def delete_rounds(
     await db.commit()
 
     try:
-        # Cache invalidation and pub/sub failures must not break successful writes.
-        await redis.delete(ANALYSIS_CACHE_KEY)
+        keys = await redis.keys(f"{ANALYSIS_CACHE_KEY}:*")
+        if keys:
+            await redis.delete(*keys)
         await redis.publish("analysis:trigger", "update")
     except RedisError:
         pass
