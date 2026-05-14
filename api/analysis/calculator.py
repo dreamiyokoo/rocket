@@ -42,7 +42,7 @@ _ALPHA = {"low": 0.5, "medium": 0.75, "high": 1.0}
 # β for target_line = mean + β × std_dev
 _BETA  = {"low": 1.0, "medium": 1.5,  "high": 2.0}
 
-FLOOR_LINE_MIN = 1.01  # clip: multipliers can't go below this
+FLOOR_LINE_MIN = 1.01  # recommendation floor lower bound (input values can be lower)
 
 
 @dataclass
@@ -185,17 +185,18 @@ def _recommendation(window: list[float]) -> Recommendation:
     """Compute floor/target lines and volatility regime for the given window."""
     mean = statistics.mean(window)
     std  = statistics.stdev(window) if len(window) >= 2 else 0.0
-    cv   = round(std / mean, 4) if mean > 0 else 0.0
+    cv_raw = (std / mean) if mean > 0 else 0.0
+    cv = round(cv_raw, 4)
 
-    if cv < REGIME_THRESHOLDS[0]:
+    if cv_raw < REGIME_THRESHOLDS[0]:
         regime = "low"
-    elif cv < REGIME_THRESHOLDS[1]:
+    elif cv_raw < REGIME_THRESHOLDS[1]:
         regime = "medium"
     else:
         regime = "high"
 
-    floor_line  = round(max(FLOOR_LINE_MIN, statistics.median(window) - _ALPHA[regime] * std), 4)
-    target_line = round(mean + _BETA[regime] * std, 4)
+    floor_line = round(max(FLOOR_LINE_MIN, statistics.median(window) - _ALPHA[regime] * std), 4)
+    target_line = round(max(floor_line, mean + _BETA[regime] * std), 4)
     return Recommendation(volatility_cv=cv, regime=regime, floor_line=floor_line, target_line=target_line)
 
 

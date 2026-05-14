@@ -154,20 +154,38 @@ def test_recommendation_high_volatility_regime():
     assert rec.volatility_cv >= REGIME_THRESHOLDS[1]
 
 
-def test_recommendation_floor_line_clipped():
-    # Very low values: median - α*std could go below 1.01
-    window = [1.01] * WINDOW
+def test_recommendation_regime_uses_unrounded_cv():
+    # raw cv is just below 0.3 but rounds to 0.3000; regime should still be low
+    window = [0.5] * 12 + [0.8895] * 6
     rec = _recommendation(window)
-    assert rec.floor_line >= FLOOR_LINE_MIN
+    assert rec.volatility_cv == pytest.approx(0.3)
+    assert rec.regime == "low"
 
 
-def test_recommendation_target_line_above_floor():
+def test_recommendation_floor_line_clipped():
+    # Raw floor is below 1.01 and must be clipped
+    window = [0.2] * 9 + [1.0] * 9
+    rec = _recommendation(window)
+    assert rec.floor_line == FLOOR_LINE_MIN
+
+
+def test_recommendation_target_line_uses_regime_beta():
     window = [1.5] * 9 + [3.0] * 9
     rec = _recommendation(window)
+    assert rec.regime == "medium"
+    expected = round(statistics.mean(window) + 1.5 * statistics.stdev(window), 4)
+    assert rec.target_line == expected
     assert rec.target_line > rec.floor_line
 
 
-def test_recommendation_in_api_response():
+def test_recommendation_target_line_not_below_floor_after_clip():
+    window = [0.2] * WINDOW
+    rec = _recommendation(window)
+    assert rec.floor_line == FLOOR_LINE_MIN
+    assert rec.target_line == FLOOR_LINE_MIN
+
+
+def test_recommendation_in_calculate_result():
     result = _make([2.0] * WINDOW)
     assert result.recommendation is not None
     rec = result.recommendation
