@@ -86,6 +86,12 @@ def _build_response(result, analyzed_at: str) -> dict:
         "chart_data": [
             {"index": i + 1, "value": v} for i, v in enumerate(result.chart_data)
         ],
+        "recommendation": {
+            "volatility_cv": result.recommendation.volatility_cv,
+            "regime": result.recommendation.regime,
+            "floor_line": result.recommendation.floor_line,
+            "target_line": result.recommendation.target_line,
+        } if result.recommendation else None,
         "analyzed_at": analyzed_at,
     }
 

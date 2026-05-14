@@ -2,7 +2,14 @@ import statistics
 
 import pytest
 
-from analysis.calculator import WINDOW, AnalysisResult, calculate
+from analysis.calculator import (
+    FLOOR_LINE_MIN,
+    REGIME_THRESHOLDS,
+    WINDOW,
+    AnalysisResult,
+    _recommendation,
+    calculate,
+)
 
 
 def _make(values: list[float]) -> AnalysisResult:
@@ -109,3 +116,62 @@ def test_chart_data_capped_at_72():
 def test_chart_data_fewer_than_72():
     result = _make([1.5] * WINDOW)
     assert len(result.chart_data) == WINDOW
+
+
+# ---------- recommendation ----------
+
+def test_recommendation_not_ready():
+    result = _make([1.5] * (WINDOW - 1))
+    assert result.recommendation is None
+
+
+def test_recommendation_present_when_ready():
+    result = _make([2.0] * WINDOW)
+    assert result.recommendation is not None
+
+
+def test_recommendation_low_volatility_regime():
+    # All same values → std=0 → cv=0 → low regime
+    window = [2.0] * WINDOW
+    rec = _recommendation(window)
+    assert rec.regime == "low"
+    assert rec.volatility_cv < REGIME_THRESHOLDS[0]
+
+
+def test_recommendation_medium_volatility_regime():
+    # Mix that produces 0.3 ≤ cv < 0.8
+    window = [1.0] * 9 + [4.0] * 9  # mean=2.5, std≈1.5, cv≈0.6
+    rec = _recommendation(window)
+    assert rec.regime == "medium"
+    assert REGIME_THRESHOLDS[0] <= rec.volatility_cv < REGIME_THRESHOLDS[1]
+
+
+def test_recommendation_high_volatility_regime():
+    # Mix that produces cv ≥ 0.8
+    window = [1.01] * 14 + [20.0] * 4  # high spread relative to mean
+    rec = _recommendation(window)
+    assert rec.regime == "high"
+    assert rec.volatility_cv >= REGIME_THRESHOLDS[1]
+
+
+def test_recommendation_floor_line_clipped():
+    # Very low values: median - α*std could go below 1.01
+    window = [1.01] * WINDOW
+    rec = _recommendation(window)
+    assert rec.floor_line >= FLOOR_LINE_MIN
+
+
+def test_recommendation_target_line_above_floor():
+    window = [1.5] * 9 + [3.0] * 9
+    rec = _recommendation(window)
+    assert rec.target_line > rec.floor_line
+
+
+def test_recommendation_in_api_response():
+    result = _make([2.0] * WINDOW)
+    assert result.recommendation is not None
+    rec = result.recommendation
+    assert isinstance(rec.volatility_cv, float)
+    assert rec.regime in ("low", "medium", "high")
+    assert isinstance(rec.floor_line, float)
+    assert isinstance(rec.target_line, float)
