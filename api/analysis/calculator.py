@@ -12,6 +12,15 @@ MACD_FAST_DEFAULT = 12
 MACD_SLOW_DEFAULT = 26
 MACD_SIGNAL_DEFAULT = 9
 
+# No-Entry Zone thresholds
+NO_ENTRY_LOW_MULTIPLIER_THRESHOLD = 1.30   # values at or below this are "low"
+NO_ENTRY_LOW_CONSECUTIVE_LIMIT    = 5      # condition ①: streak length trigger
+NO_ENTRY_POST_SPIKE_THRESHOLD     = 10.0  # condition ②: "spike" definition
+NO_ENTRY_POST_SPIKE_AVG_MAX       = 1.30  # condition ②: post-spike avg ceiling
+NO_ENTRY_POST_SPIKE_WINDOW        = 3     # condition ②: how many post-spike values to average
+NO_ENTRY_LOW_VOLATILITY_CV        = 0.25  # condition ③: CV below this → low vol
+NO_ENTRY_LOW_EV_MEDIAN_THRESHOLD  = 1.50  # condition ④: median below this → low EV
+
 
 @dataclass
 class WindowStats:
@@ -54,6 +63,15 @@ class Recommendation:
 
 
 @dataclass
+class NoEntry:
+    active: bool
+    reasons: list[str]
+    low_consecutive_count: int
+    volatility_cv: float
+    median_value: float
+
+
+@dataclass
 class AnalysisResult:
     ready: bool
     total_rounds: int
@@ -75,6 +93,7 @@ class AnalysisResult:
     macd_signal_period: int = MACD_SIGNAL_DEFAULT
     macd_chart: list[MacdPoint | None] = field(default_factory=list)
     recommendation: Recommendation | None = None
+    no_entry: NoEntry | None = None
     history: list[WindowStats] = field(default_factory=list)
     chart_data: list[float] = field(default_factory=list)
 
@@ -200,6 +219,50 @@ def _recommendation(window: list[float]) -> Recommendation:
     return Recommendation(volatility_cv=cv, regime=regime, floor_line=floor_line, target_line=target_line)
 
 
+def _no_entry(multipliers: list[float], window: list[float]) -> NoEntry:
+    """Evaluate the three no-entry conditions against all available data."""
+    reasons: list[str] = []
+
+    # ① Low-multiplier streak
+    streak = 0
+    for v in reversed(multipliers):
+        if v <= NO_ENTRY_LOW_MULTIPLIER_THRESHOLD:
+            streak += 1
+        else:
+            break
+    if streak >= NO_ENTRY_LOW_CONSECUTIVE_LIMIT:
+        reasons.append("low_consecutive")
+
+    # ② Post-spike cooldown: value just before the trailing window was a spike AND the trailing post-spike avg is low
+    if len(multipliers) >= NO_ENTRY_POST_SPIKE_WINDOW + 1:
+        spike_candidate = multipliers[-(NO_ENTRY_POST_SPIKE_WINDOW + 1)]
+        post_values = multipliers[-NO_ENTRY_POST_SPIKE_WINDOW:]
+        if (spike_candidate >= NO_ENTRY_POST_SPIKE_THRESHOLD
+                and statistics.mean(post_values) < NO_ENTRY_POST_SPIKE_AVG_MAX):
+            reasons.append("post_spike")
+
+    # ③ Low volatility (CV)
+    mean = statistics.mean(window)
+    std  = statistics.stdev(window) if len(window) >= 2 else 0.0
+    cv_raw = (std / mean) if mean > 0 else 0.0
+    cv   = round(cv_raw, 4)
+    if cv_raw < NO_ENTRY_LOW_VOLATILITY_CV:
+        reasons.append("low_volatility")
+
+    # ④ Low expected value (median)
+    median_val = round(statistics.median(window), 4)
+    if median_val < NO_ENTRY_LOW_EV_MEDIAN_THRESHOLD:
+        reasons.append("low_expected_value")
+
+    return NoEntry(
+        active=len(reasons) > 0,
+        reasons=reasons,
+        low_consecutive_count=streak,
+        volatility_cv=cv,
+        median_value=median_val,
+    )
+
+
 # ── Main calculation ─────────────────────────────────────────────────────────
 
 def calculate(
@@ -277,6 +340,7 @@ def calculate(
         macd_signal_period=macd_signal,
         macd_chart=macd_chart,
         recommendation=_recommendation(recent),
+        no_entry=_no_entry(multipliers, recent),
         history=history,
         chart_data=chart_data,
     )

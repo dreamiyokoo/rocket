@@ -18,6 +18,16 @@ type Recommendation = {
   target_line: number;
 };
 
+type NoEntryReason = "low_consecutive" | "post_spike" | "low_volatility" | "low_expected_value";
+
+type NoEntryData = {
+  active: boolean;
+  reasons: NoEntryReason[];
+  low_consecutive_count: number;
+  volatility_cv: number;
+  median_value: number;
+};
+
 type AnalysisData = {
   ready: boolean;
   total_rounds: number;
@@ -36,6 +46,7 @@ type AnalysisData = {
   bollinger_bands?: { current: BB | null; chart: (BB | null)[] };
   chart_data?: { index: number; value: number }[];
   recommendation?: Recommendation;
+  no_entry?: NoEntryData;
   analyzed_at?: string;
 };
 
@@ -209,12 +220,14 @@ function multiplierBadgeClass(v: number): string {
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const [data, setData]     = useState<AnalysisData | null>(null);
-  const [error, setError]   = useState(false);
-  const [rounds, setRounds] = useState<Round[]>([]);
-  const [params, setParams] = useState<Params>(DEFAULT_PARAMS);
-  const [draft, setDraft]   = useState<Params>(DEFAULT_PARAMS);
+  type ChartTab = "prob" | "multiplier" | "rsi" | "macd";
+  const [data, setData]         = useState<AnalysisData | null>(null);
+  const [error, setError]       = useState(false);
+  const [rounds, setRounds]     = useState<Round[]>([]);
+  const [params, setParams]     = useState<Params>(DEFAULT_PARAMS);
+  const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
+  const [activeTab, setActiveTab] = useState<ChartTab>("prob");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paramsRef = useRef<Params>(params);
 
@@ -316,95 +329,91 @@ export default function Home() {
       {!data && !error && <p className="text-gray-400 text-sm">読み込み中...</p>}
       {error && <p className="text-red-400 text-sm">データ取得に失敗しました。</p>}
       {data && (
-        <div className="bg-gray-900 rounded-xl p-4 flex items-center gap-6">
-          <div>
-            <p className="text-xs text-gray-500">蓄積件数</p>
-            <p className="text-xl font-bold text-white">{data.total_rounds}<span className="text-sm text-gray-400 ml-1">rounds</span></p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500">状態</p>
-            {data.ready
-              ? <p className="text-green-400 font-semibold">分析中</p>
-              : <p className="text-yellow-400 font-semibold">あと {remaining} 件で分析開始</p>}
-          </div>
-          {data.ready && data.analyzed_at && (
-            <div className="ml-auto">
-              <p className="text-xs text-gray-600">最終更新</p>
-              <p className="text-xs text-gray-500">{new Date(data.analyzed_at).toLocaleTimeString("ja-JP")}</p>
+        <div className="bg-gray-900 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-6">
+            <div>
+              <p className="text-xs text-gray-500">蓄積件数</p>
+              <p className="text-xl font-bold text-white">{data.total_rounds}<span className="text-sm text-gray-400 ml-1">rounds</span></p>
             </div>
-          )}
+            <div>
+              <p className="text-xs text-gray-500">状態</p>
+              {data.ready
+                ? <p className="text-green-400 font-semibold">分析中</p>
+                : <p className="text-yellow-400 font-semibold">あと {remaining} 件で分析開始</p>}
+            </div>
+            {data.ready && data.analyzed_at && (
+              <div className="ml-auto">
+                <p className="text-xs text-gray-600">最終更新</p>
+                <p className="text-xs text-gray-500">{new Date(data.analyzed_at).toLocaleTimeString("ja-JP")}</p>
+              </div>
+            )}
+          </div>
+          {data.ready && data.no_entry && (() => {
+            const ne = data.no_entry;
+            const count = ne.reasons.length;
+            const { bg, label } = count === 0
+              ? { bg: "bg-green-700", label: "エントリー可" }
+              : count === 1
+              ? { bg: "bg-yellow-500 text-black", label: "注意" }
+              : { bg: "bg-red-600", label: "買い禁止" };
+            const conditions: { key: string; label: string; value: string; threshold: string; triggered: boolean }[] = [
+              {
+                key: "low_consecutive",
+                label: "① 低倍率連続",
+                value: `${ne.low_consecutive_count}連続`,
+                threshold: "5連続以上で発動",
+                triggered: ne.reasons.includes("low_consecutive"),
+              },
+              {
+                key: "post_spike",
+                label: "② 高倍率後調整",
+                value: ne.reasons.includes("post_spike") ? "検出" : "なし",
+                threshold: "10x直後に3件平均<1.3で発動",
+                triggered: ne.reasons.includes("post_spike"),
+              },
+              {
+                key: "low_volatility",
+                label: "③ 低ボラティリティ",
+                value: `CV ${ne.volatility_cv.toFixed(2)}`,
+                threshold: "CV 0.25未満で発動",
+                triggered: ne.reasons.includes("low_volatility"),
+              },
+              {
+                key: "low_expected_value",
+                label: "④ 期待値不足",
+                value: `中央値 ${ne.median_value.toFixed(2)}x`,
+                threshold: "中央値 1.50x未満で発動",
+                triggered: ne.reasons.includes("low_expected_value"),
+              },
+            ];
+            return (
+              <div className="space-y-2">
+              <div role="status" className={`flex flex-wrap items-center gap-3 rounded-lg px-3 py-2 ${bg} ${count < 2 ? "" : "text-white"}`}>
+                  <span className="font-bold text-sm">{label}</span>
+                  {ne.reasons.map((r) => (
+                    <span key={r} className="text-xs opacity-80">
+                      {conditions.find((c) => c.key === r)?.label}
+                    </span>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  {conditions.map((c) => (
+                    <div key={c.key} className={`flex items-start gap-2 rounded px-2 py-1.5 text-xs ${c.triggered ? "bg-red-950 border border-red-800" : "bg-gray-800"}`}>
+                      <span className={`mt-0.5 shrink-0 ${c.triggered ? "text-red-400" : "text-green-500"}`}>
+                        {c.triggered ? "✗" : "✓"}
+                      </span>
+                      <div className="min-w-0">
+                        <p className={`font-semibold ${c.triggered ? "text-red-300" : "text-gray-300"}`}>{c.label}</p>
+                        <p className={`font-mono ${c.triggered ? "text-red-200" : "text-white"}`}>{c.value}</p>
+                        <p className="text-gray-500">{c.threshold}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
-      )}
-
-      {/* Probability transition */}
-      {data?.ready && data.prob_2x && data.prob_5x && data.prob_10x && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-300">確率遷移</h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span><span className="text-green-400 font-bold">■</span> 2x以上 {pct(data.prob_2x.current)}</span>
-              <span><span className="text-yellow-400 font-bold">■</span> 5x以上 {pct(data.prob_5x.current)}</span>
-              <span><span className="text-red-400 font-bold">■</span> 10x以上 {pct(data.prob_10x.current)}</span>
-            </div>
-          </div>
-          <ProbChart data={data} />
-        </section>
-      )}
-
-      {/* Multiplier + Bollinger */}
-      {data?.ready && data.chart_data && data.chart_data.length > 0 && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-300">倍率履歴（対数スケール）</h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span><span className="text-blue-400 font-bold">■</span> 倍率</span>
-              <span><span className="text-gray-400 font-bold">--</span> ボリンジャーバンド</span>
-            </div>
-          </div>
-          <MultiplierChart data={data} />
-        </section>
-      )}
-
-      {/* RSI */}
-      {data?.ready && data.rsi && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-300">RSI（{data.rsi.period}期間・移動平均ベース）</h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span className="text-red-400">── 70 過買い</span>
-              <span className="text-blue-400">── 30 過売り</span>
-              {data.rsi.current != null && (
-                <span className="text-purple-400 font-bold">現在 {data.rsi.current.toFixed(1)}</span>
-              )}
-            </div>
-          </div>
-          {data.rsi.chart.some((v) => v !== null)
-            ? <RsiChart rsi={data.rsi.chart} />
-            : <p className="text-sm text-gray-500 py-4 text-center">
-                データ不足（{rsiNeeded}件以上必要、現在 {data.total_rounds} 件）
-              </p>}
-        </section>
-      )}
-
-      {/* MACD */}
-      {data?.ready && data.macd && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-sm font-semibold text-gray-300">
-              MACD（{data.macd.fast}/{data.macd.slow}/{data.macd.signal_period}・移動平均ベース）
-            </h2>
-            <div className="flex gap-4 text-xs text-gray-400">
-              <span><span className="text-blue-400 font-bold">─</span> MACD</span>
-              <span><span className="text-yellow-400 font-bold">--</span> シグナル</span>
-              <span><span className="text-green-400 font-bold">■</span> ヒストグラム</span>
-            </div>
-          </div>
-          {data.macd.chart.some((p) => p !== null)
-            ? <MacdChart macd={data.macd.chart} />
-            : <p className="text-sm text-gray-500 py-4 text-center">
-                データ不足（{macdNeeded}件以上必要、現在 {data.total_rounds} 件）
-              </p>}
-        </section>
       )}
 
       {/* Recommendation */}
@@ -419,19 +428,116 @@ export default function Home() {
               <span className={`text-xs font-bold px-2 py-0.5 rounded ${regimeColor}`}>{regimeLabel}</span>
               <span className="text-xs text-gray-500 ml-auto">CV {rec.volatility_cv.toFixed(2)}</span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-800 rounded-lg p-3">
-                <p className="text-xs text-gray-500">下限ライン（損失最小化）</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
+                <p className="text-xs font-semibold text-blue-400">下限ライン</p>
                 <p className="text-2xl font-bold text-blue-400">{fmt(rec.floor_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
+                <p className="text-xs text-gray-500">低倍率が続く局面で、これ以上になったら即キャッシュアウト</p>
               </div>
-              <div className="bg-gray-800 rounded-lg p-3">
-                <p className="text-xs text-gray-500">利確ライン（利益最大化）</p>
+              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
+                <p className="text-xs font-semibold text-gray-300">50% 期待値</p>
+                <p className="text-2xl font-bold text-white">{data.median != null ? fmt(data.median) : "—"}<span className="text-sm text-gray-400 ml-1">x</span></p>
+                <p className="text-xs text-gray-500">直近18件の中央値 — 2回に1回はこの倍率以上に到達</p>
+              </div>
+              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
+                <p className="text-xs font-semibold text-green-400">利確ライン</p>
                 <p className="text-2xl font-bold text-green-400">{fmt(rec.target_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
+                <p className="text-xs text-gray-500">波が来た局面で狙う利確目標。欲張らずここで逃す</p>
               </div>
             </div>
           </section>
         );
       })()}
+
+      {/* Charts with tab switcher */}
+      {data?.ready && (
+        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
+          {/* Tab bar */}
+          <div className="flex gap-1 border-b border-gray-700 pb-2">
+            {(
+              [
+                { key: "prob",       label: "確率遷移" },
+                { key: "multiplier", label: "倍率履歴" },
+                { key: "rsi",        label: "RSI" },
+                { key: "macd",       label: "MACD" },
+              ] as { key: ChartTab; label: string }[]
+            ).map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`px-3 py-1 text-xs rounded-t transition-colors ${
+                  activeTab === key
+                    ? "bg-gray-700 text-white font-semibold"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Probability */}
+          {activeTab === "prob" && data.prob_2x && data.prob_5x && data.prob_10x && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex gap-4 text-xs text-gray-400">
+                  <span><span className="text-green-400 font-bold">■</span> 2x以上 {pct(data.prob_2x.current)}</span>
+                  <span><span className="text-yellow-400 font-bold">■</span> 5x以上 {pct(data.prob_5x.current)}</span>
+                  <span><span className="text-red-400 font-bold">■</span> 10x以上 {pct(data.prob_10x.current)}</span>
+                </div>
+              </div>
+              <ProbChart data={data} />
+            </div>
+          )}
+
+          {/* Multiplier + Bollinger */}
+          {activeTab === "multiplier" && data.chart_data && data.chart_data.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-gray-400">
+                <span><span className="text-blue-400 font-bold">■</span> 倍率（対数スケール）</span>
+                <span><span className="text-gray-400 font-bold">--</span> ボリンジャーバンド</span>
+              </div>
+              <MultiplierChart data={data} />
+            </div>
+          )}
+
+          {/* RSI */}
+          {activeTab === "rsi" && data.rsi && (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-gray-400">
+                <span className="text-gray-300">{data.rsi.period}期間・移動平均ベース</span>
+                <span className="text-red-400">── 70 過買い</span>
+                <span className="text-blue-400">── 30 過売り</span>
+                {data.rsi.current != null && (
+                  <span className="text-purple-400 font-bold ml-auto">現在 {data.rsi.current.toFixed(1)}</span>
+                )}
+              </div>
+              {data.rsi.chart.some((v) => v !== null)
+                ? <RsiChart rsi={data.rsi.chart} />
+                : <p className="text-sm text-gray-500 py-8 text-center">
+                    データ不足（{rsiNeeded}件以上必要、現在 {data.total_rounds} 件）
+                  </p>}
+            </div>
+          )}
+
+          {/* MACD */}
+          {activeTab === "macd" && data.macd && (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-gray-400">
+                <span className="text-gray-300">{data.macd.fast}/{data.macd.slow}/{data.macd.signal_period}・移動平均ベース</span>
+                <span><span className="text-blue-400 font-bold">─</span> MACD</span>
+                <span><span className="text-yellow-400 font-bold">--</span> シグナル</span>
+                <span><span className="text-green-400 font-bold">■</span> ヒストグラム</span>
+              </div>
+              {data.macd.chart.some((p) => p !== null)
+                ? <MacdChart macd={data.macd.chart} />
+                : <p className="text-sm text-gray-500 py-8 text-center">
+                    データ不足（{macdNeeded}件以上必要、現在 {data.total_rounds} 件）
+                  </p>}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Metrics */}
       {data?.ready && (
