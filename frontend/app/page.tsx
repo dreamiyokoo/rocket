@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const POLL_INTERVAL = 30_000;
 const READY_THRESHOLD = 18;
 
@@ -201,7 +201,6 @@ export default function Home() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async (p: Params) => {
-    if (!API_URL) return;
     try {
       const qs = new URLSearchParams({
         rsi_period:  String(p.rsi_period),

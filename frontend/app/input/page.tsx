@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearAccessToken, getValidAccessToken } from "../lib/auth";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const READY_THRESHOLD = 18;
 
 function multiplierBadgeClass(v: number): string {
@@ -39,7 +39,6 @@ export default function InputPage() {
   }, [router]);
 
   const fetchStatus = useCallback(async () => {
-    if (!API_URL) return;
     try {
       const res = await fetch(`${API_URL}/api/v1/analysis`);
       if (!res.ok) return;
@@ -51,7 +50,6 @@ export default function InputPage() {
   }, []);
 
   const fetchRounds = useCallback(async () => {
-    if (!API_URL) return;
     try {
       const res = await fetch(`${API_URL}/api/v1/rounds?limit=72`);
       if (!res.ok) return;
@@ -66,12 +64,6 @@ export default function InputPage() {
     const token = getValidAccessToken();
     if (!token) {
       router.replace("/login");
-      return;
-    }
-    if (!API_URL) {
-      setCheckingAuth(false);
-      setToast({ message: "API接続先が設定されていません。", type: "error" });
-      setTimeout(() => setToast(null), 3000);
       return;
     }
     setCheckingAuth(false);
@@ -99,11 +91,6 @@ export default function InputPage() {
     const parsed = parseValues();
     if ("error" in parsed) {
       setValidationError(parsed.error);
-      return;
-    }
-
-    if (!API_URL) {
-      showToast("API接続先が設定されていません。", "error");
       return;
     }
 
@@ -138,11 +125,6 @@ export default function InputPage() {
   const handleReset = async () => {
     if (!confirm("全データを削除します。よろしいですか？")) return;
 
-    if (!API_URL) {
-      showToast("API接続先が設定されていません。", "error");
-      return;
-    }
-
     const token = getValidAccessToken();
     if (!token) { router.replace("/login"); return; }
 
@@ -171,11 +153,6 @@ export default function InputPage() {
   };
 
   const handleLogout = async () => {
-    if (!API_URL) {
-      showToast("API接続先が設定されていません。", "error");
-      return;
-    }
-
     const token = getValidAccessToken();
     if (token) {
       try {
