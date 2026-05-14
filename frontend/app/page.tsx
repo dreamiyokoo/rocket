@@ -382,14 +382,21 @@ export default function Home() {
               <span className={`text-xs font-bold px-2 py-0.5 rounded ${regimeColor}`}>{regimeLabel}</span>
               <span className="text-xs text-gray-500 ml-auto">CV {rec.volatility_cv.toFixed(2)}</span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-800 rounded-lg p-3">
-                <p className="text-xs text-gray-500">下限ライン（損失最小化）</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
+                <p className="text-xs font-semibold text-blue-400">下限ライン</p>
                 <p className="text-2xl font-bold text-blue-400">{fmt(rec.floor_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
+                <p className="text-xs text-gray-500">低倍率が続く局面で、これ以上になったら即キャッシュアウト</p>
               </div>
-              <div className="bg-gray-800 rounded-lg p-3">
-                <p className="text-xs text-gray-500">利確ライン（利益最大化）</p>
+              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
+                <p className="text-xs font-semibold text-gray-300">50% 期待値</p>
+                <p className="text-2xl font-bold text-white">{data.median != null ? fmt(data.median) : "—"}<span className="text-sm text-gray-400 ml-1">x</span></p>
+                <p className="text-xs text-gray-500">直近18件の中央値 — 2回に1回はこの倍率以上に到達</p>
+              </div>
+              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
+                <p className="text-xs font-semibold text-green-400">利確ライン</p>
                 <p className="text-2xl font-bold text-green-400">{fmt(rec.target_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
+                <p className="text-xs text-gray-500">波が来た局面で狙う利確目標。欲張らずここで逃す</p>
               </div>
             </div>
           </section>
