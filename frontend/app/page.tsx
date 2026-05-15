@@ -168,8 +168,13 @@ function MacdChart({ macd }: { macd: (MacdPoint | null)[] }) {
   const n = macd.length;
   const vals = macd.flatMap((p) => p ? [p.macd, p.signal ?? p.macd, p.histogram ?? 0] : []);
   if (vals.length === 0) return null;
-  const lo = Math.min(...vals) - Math.abs(Math.min(...vals)) * 0.1 - 0.01;
-  const hi = Math.max(...vals) + Math.abs(Math.max(...vals)) * 0.1 + 0.01;
+  // outlier を除外するためパーセンタイルでスケール計算
+  const sorted = [...vals].sort((a, b) => a - b);
+  const p02 = sorted[Math.max(0, Math.floor(sorted.length * 0.02))];
+  const p98 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.98))];
+  const pad = Math.abs(p98 - p02) * 0.15 + 0.01;
+  const lo = p02 - pad;
+  const hi = p98 + pad;
   const yM = (v: number) => yLinear(v, lo, hi);
   const zero = yM(0);
   const barW = Math.max(1, (PW / n) * 0.6);
