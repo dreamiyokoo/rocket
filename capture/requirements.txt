@@ -1,0 +1,5 @@
+opencv-python-headless
+pytesseract
+httpx
+pyyaml
+numpy

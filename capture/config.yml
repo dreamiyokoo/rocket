@@ -1,0 +1,22 @@
+# capture 設定ファイル
+
+# ADB 接続設定
+adb:
+  # 実機接続の場合は "usb", エミュレーターは "emulator-5554" など
+  device: "usb"
+
+# API 設定
+api:
+  base_url: "http://localhost:8001"
+  username: ""   # .env の CAPTURE_USERNAME で上書き可
+  password: ""   # .env の CAPTURE_PASSWORD で上書き可
+
+# スクリーンショット → OCR 設定
+capture:
+  # 履歴バー（直近4件のピル）のクロップ座標 [y_start, y_end, x_start, x_end]
+  # 実機 1080x2460 の場合の値。端末が変わったら calibrate.py で調整
+  bar_crop: [695, 755, 240, 820]
+  # ポーリング間隔（秒）
+  poll_interval: 5
+  # OCR 拡大倍率
+  scale: 4

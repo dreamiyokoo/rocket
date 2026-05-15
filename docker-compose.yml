@@ -75,6 +75,19 @@ services:
       - frontend
       - api
 
+  capture:
+    build: ./capture
+    # network_mode: host でホストの ADB サーバー (localhost:5037) と
+    # API (localhost:8001) の両方に直接アクセス
+    network_mode: host
+    environment:
+      CAPTURE_USERNAME: ${CAPTURE_USERNAME}
+      CAPTURE_PASSWORD: ${CAPTURE_PASSWORD}
+      API_BASE_URL: http://localhost:8001
+    depends_on:
+      - api
+    restart: unless-stopped
+
 volumes:
   db_data:
   redis_data:
