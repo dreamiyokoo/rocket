@@ -4,7 +4,7 @@ import statistics
 from dataclasses import dataclass, field
 
 WINDOW = 18
-MAX_HISTORY = 72
+MAX_HISTORY = 300
 
 # Default indicator periods (overridable via API query params)
 RSI_PERIOD_DEFAULT = 14
