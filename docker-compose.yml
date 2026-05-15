@@ -75,6 +75,21 @@ services:
       - frontend
       - api
 
+  capture:
+    build: ./capture
+    # host network 非依存にし、API は compose ネットワーク経由で接続
+    # ADB は host.docker.internal 経由でホスト側サーバー(5037)へ接続
+    environment:
+      CAPTURE_USERNAME: ${CAPTURE_USERNAME}
+      CAPTURE_PASSWORD: ${CAPTURE_PASSWORD}
+      API_BASE_URL: http://api:8000
+      ADB_SERVER_SOCKET: tcp:host.docker.internal:5037
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api
+    restart: unless-stopped
+
 volumes:
   db_data:
   redis_data:
