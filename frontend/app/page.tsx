@@ -234,7 +234,7 @@ export default function Home() {
   const [soundEnabled, setSoundEnabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paramsRef = useRef<Params>(params);
-  const prevEntryOkRef = useRef<boolean | null>(null);
+  const prevEntryOkRef = useRef<boolean>(false);
 
   useEffect(() => { paramsRef.current = params; }, [params]);
 
@@ -320,7 +320,7 @@ export default function Home() {
           <button
             onClick={() => setSoundEnabled((s) => !s)}
             title={soundEnabled ? "サウンド ON（クリックでOFF）" : "サウンド OFF（クリックでON）"}
-            className={`text-sm transition-colors ${soundEnabled ? "text-green-400 hover:text-green-300" : "text-gray-500 hover:text-gray-300"}`}
+            className={`text-lg transition-colors ${soundEnabled ? "text-green-400 hover:text-green-300" : "text-gray-500 hover:text-gray-300"}`}
           >
             {soundEnabled ? "🔔" : "🔕"}
           </button>
