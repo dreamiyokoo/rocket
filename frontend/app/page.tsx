@@ -231,8 +231,10 @@ export default function Home() {
   const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<ChartTab>("prob");
+  const [soundEnabled, setSoundEnabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paramsRef = useRef<Params>(params);
+  const prevEntryOkRef = useRef<boolean | null>(null);
 
   useEffect(() => { paramsRef.current = params; }, [params]);
 
@@ -289,6 +291,18 @@ export default function Home() {
     setShowSettings(false);
   };
 
+  // entry_ok が false→true に変わったときに通知音を鳴らす
+  useEffect(() => {
+    const entryOk = data?.recommendation?.entry_ok ?? false;
+    if (soundEnabled && prevEntryOkRef.current === false && entryOk === true) {
+      try {
+        const audio = new Audio("/notify.mp3");
+        audio.play().catch(() => {/* autoplay ブロック時は無視 */});
+      } catch { /* Audio 非対応環境では無視 */ }
+    }
+    prevEntryOkRef.current = entryOk;
+  }, [data, soundEnabled]);
+
   const remaining = data ? Math.max(0, READY_THRESHOLD - data.total_rounds) : null;
   const rsiNeeded  = READY_THRESHOLD + params.rsi_period;
   const macdNeeded = READY_THRESHOLD + params.macd_slow + params.macd_signal - 2;
@@ -302,6 +316,13 @@ export default function Home() {
           <button onClick={() => { setShowSettings((s) => !s); setDraft(params); }}
             className="text-sm text-gray-400 hover:text-white transition-colors">
             {showSettings ? "▲ 設定を閉じる" : "⚙ 期間設定"}
+          </button>
+          <button
+            onClick={() => setSoundEnabled((s) => !s)}
+            title={soundEnabled ? "サウンド ON（クリックでOFF）" : "サウンド OFF（クリックでON）"}
+            className={`text-sm transition-colors ${soundEnabled ? "text-green-400 hover:text-green-300" : "text-gray-500 hover:text-gray-300"}`}
+          >
+            {soundEnabled ? "🔔" : "🔕"}
           </button>
           <a href="/input" className="text-sm text-gray-400 hover:text-white transition-colors">入力画面 →</a>
         </div>
