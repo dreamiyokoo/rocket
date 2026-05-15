@@ -171,12 +171,21 @@ def run(cfg: dict, once: bool = False, debug: bool = False) -> None:
         while True:
             # 24時間ごとにトークン再取得（JWT_EXPIRE_MINUTES=1440 対応）
             if time.time() - token_refreshed_at > 23 * 3600:
-                try:
-                    token = login(client, base_url, username, password)
-                    token_refreshed_at = time.time()
-                    print("[INFO] トークン再取得")
-                except (httpx.RequestError, httpx.HTTPStatusError) as e:
-                    print(f"[WARN] トークン再取得に失敗。次ループで再試行します: {e}", file=sys.stderr)
+                refreshed = False
+                for retry in range(3):
+                    try:
+                        token = login(client, base_url, username, password)
+                        token_refreshed_at = time.time()
+                        print("[INFO] トークン再取得")
+                        refreshed = True
+                        break
+                    except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                        wait = 2 ** retry
+                        print(f"[WARN] トークン再取得失敗 ({retry + 1}/3): {e}", file=sys.stderr)
+                        if retry < 2:
+                            time.sleep(wait)
+                if not refreshed:
+                    print("[WARN] トークン再取得をスキップし、既存トークンで継続します", file=sys.stderr)
 
             img = take_screenshot(device)
             if img is None:
@@ -202,7 +211,18 @@ def run(cfg: dict, once: bool = False, debug: bool = False) -> None:
                     print(f"[INFO] POST 成功: inserted={result['inserted']}, total={result['total']}")
                     last_latest = latest
                 except httpx.HTTPStatusError as e:
-                    print(f"[ERROR] POST 失敗: {e.response.status_code} {e.response.text}", file=sys.stderr)
+                    if e.response.status_code == 401:
+                        print("[WARN] トークン期限切れの可能性。再ログインして再送します", file=sys.stderr)
+                        try:
+                            token = login(client, base_url, username, password)
+                            token_refreshed_at = time.time()
+                            result = post_round(client, base_url, token, latest)
+                            print(f"[INFO] POST 成功: inserted={result['inserted']}, total={result['total']}")
+                            last_latest = latest
+                        except (httpx.RequestError, httpx.HTTPStatusError) as relogin_error:
+                            print(f"[ERROR] 再ログイン後の POST 失敗: {relogin_error}", file=sys.stderr)
+                    else:
+                        print(f"[ERROR] POST 失敗: {e.response.status_code} {e.response.text}", file=sys.stderr)
                 except httpx.RequestError as e:
                     print(f"[ERROR] リクエストエラー: {e}", file=sys.stderr)
             else:
