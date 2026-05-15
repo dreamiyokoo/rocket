@@ -318,7 +318,16 @@ export default function Home() {
             {showSettings ? "▲ 設定を閉じる" : "⚙ 期間設定"}
           </button>
           <button
-            onClick={() => setSoundEnabled((s) => !s)}
+            onClick={() => {
+              const next = !soundEnabled;
+              setSoundEnabled(next);
+              if (next) {
+                try {
+                  const audio = new Audio("/notify.mp3");
+                  audio.play().catch(() => {});
+                } catch { /* ignore */ }
+              }
+            }}
             title={soundEnabled ? "サウンド ON（クリックでOFF）" : "サウンド OFF（クリックでON）"}
             className={`text-lg transition-colors ${soundEnabled ? "text-green-400 hover:text-green-300" : "text-gray-500 hover:text-gray-300"}`}
           >
