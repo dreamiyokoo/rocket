@@ -291,10 +291,10 @@ export default function Home() {
     setShowSettings(false);
   };
 
-  // entry_ok が false→true に変わったときに通知音を鳴らす
+  // データ更新のたびに entry_ok が true なら通知音を鳴らす
   useEffect(() => {
     const entryOk = data?.recommendation?.entry_ok ?? false;
-    if (soundEnabled && prevEntryOkRef.current === false && entryOk === true) {
+    if (soundEnabled && entryOk) {
       try {
         const audio = new Audio("/notify.mp3");
         audio.play().catch(() => {/* autoplay ブロック時は無視 */});
