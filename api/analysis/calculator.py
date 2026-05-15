@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import statistics
 from dataclasses import dataclass, field
 
@@ -313,11 +314,13 @@ def calculate(
 
     # Moving-average series: the mean multiplier of each 18-round window
     moving_avg_series = [ws.moving_avg for ws in history]
+    # Log-transformed series for MACD/RSI to suppress extreme-multiplier outliers
+    log_avg_series = [math.log(max(v, 0.001)) for v in moving_avg_series]
 
-    # RSI applied to moving-average series (parallel to history)
-    rsi_chart = _rsi_series(moving_avg_series, rsi_period)
-    # MACD applied to moving-average series (parallel to history)
-    macd_chart = _macd_series(moving_avg_series, macd_fast, macd_slow, macd_signal)
+    # RSI applied to log moving-average series
+    rsi_chart = _rsi_series(log_avg_series, rsi_period)
+    # MACD applied to log moving-average series
+    macd_chart = _macd_series(log_avg_series, macd_fast, macd_slow, macd_signal)
 
     return AnalysisResult(
         ready=True,
