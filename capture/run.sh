@@ -24,6 +24,12 @@ if [[ "$DEVICES" -eq 0 ]]; then
     echo "  2. USB を挿し直して 'このPCを信頼しますか？' を許可してください。"
     exit 1
 fi
+if [[ "$DEVICES" -gt 1 ]]; then
+    echo "[ERROR] ADB デバイスが複数接続されています (${DEVICES}台)。"
+    echo "  capture/config.yml の adb.device にシリアルを指定するか、1台だけ接続してください。"
+    adb devices
+    exit 1
+fi
 
 echo "[INFO] デバイス接続確認 OK (${DEVICES}台)"
 

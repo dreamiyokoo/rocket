@@ -171,9 +171,12 @@ def run(cfg: dict, once: bool = False, debug: bool = False) -> None:
         while True:
             # 24時間ごとにトークン再取得（JWT_EXPIRE_MINUTES=1440 対応）
             if time.time() - token_refreshed_at > 23 * 3600:
-                token = login(client, base_url, username, password)
-                token_refreshed_at = time.time()
-                print("[INFO] トークン再取得")
+                try:
+                    token = login(client, base_url, username, password)
+                    token_refreshed_at = time.time()
+                    print("[INFO] トークン再取得")
+                except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                    print(f"[WARN] トークン再取得に失敗。次ループで再試行します: {e}", file=sys.stderr)
 
             img = take_screenshot(device)
             if img is None:

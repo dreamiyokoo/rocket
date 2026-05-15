@@ -19,7 +19,7 @@ Ubuntu Host
 │  emulator -avd RocketDevice &              │
 │  ADB Server :5037 ←─────────────────────┐ │
 │                                            │ │
-│  Docker Compose (network_mode: host)       │ │
+│  Docker Compose (bridge network)            │ │
 │  ┌──────────────────────────────┐    │ │
 │  │ capture コンテナ                       │    │ │
 │  │   adb client ─────────────────────┼─┘ │
@@ -35,9 +35,8 @@ Ubuntu Host
 └─────────────────────────────────────────────────┘
 ```
 
-> **ポイント**: エミュレーターはホストで起動するため画面が直接見えます。  
-> `capture` コンテナは ADB クライアント + OCR 処理のみ担当します。  
-> CI/server 環境では `EMULATOR_MODE=headless` でコンテナ内ヘッドレス起動も可能です。
+> **ポイント**: `capture` コンテナは ADB クライアント + OCR 処理を担当し、  
+> ADB は `ADB_SERVER_SOCKET=tcp:host.docker.internal:5037` でホスト側サーバーに接続する。
 
 ---
 
@@ -48,10 +47,9 @@ rocket/
 └─ capture/
     ├─ Dockerfile          # OCR コンテナ
     ├─ requirements.txt    # opencv-python, pytesseract, httpx, ...
-    ├─ run.sh              # エミュレーター管理・メインループ
+    ├─ run.sh              # ADB 接続確認 + ocr.py 起動
     ├─ ocr.py              # スクリーンショット → 倍率 → API 送信
-    ├─ calibrate.py        # クロップ座標調整ツール
-    └─ config.yml          # AVD名・パッケージ名・API設定
+    └─ config.yml          # ADB・API・OCR設定
 ```
 
 `docker-compose.yml` に `capture` サービスを追加する。
@@ -71,15 +69,14 @@ rocket/
 emulator -avd RocketDevice &
 ```
 
-`capture` コンテナは起動後、ホストの ADB サーバー（`localhost:5037`）に自動接続します。
+`capture` コンテナは起動後、ホストの ADB サーバー（`5037`）に接続します。
 
 ```bash
-# docker-compose.yml EMULATOR_MODE=host（デフォルト）で:
 docker-compose up capture
-# → ホストの emulator が検出されるまで最大120秒待ち
+# → 接続済みデバイスを利用して OCR ループを実行
 ```
 
-**APK インストール** (`APK_PATH` が設定されている場合、未インストール時のみ実行):
+**APK インストール**（必要な場合は手動実行）:
 
 ```bash
 adb install -r "${APK_PATH}"
@@ -128,7 +125,8 @@ CRASHED 検出時に前のピーク値を rounds テーブルに送信する。
 ### Phase 3: API 送信
 
 既存の `POST /api/v1/rounds` エンドポイントを使用する。  
-JWT トークンを `config.yml` に保存し、ヘッダーに付与する。
+`config.yml`（または環境変数）で設定した `username` / `password` で
+`/api/v1/auth/login` にログインして JWT を取得し、ヘッダーに付与する。
 
 ```python
 httpx.post(
@@ -166,16 +164,13 @@ systemd の `Restart=always` と組み合わせて、プロセス自体が落ち
 ```yaml
 capture:
   build: ./capture
-  network_mode: host          # ADB(5037) と API(8001) に同時アクセス
   environment:
-    API_URL: http://localhost:8001
-    API_TOKEN: ${CAPTURE_API_TOKEN}
-    APP_ID: ${APP_ID}
-    APP_PASSWORD: ${APP_PASSWORD}
-    AVD_NAME: ${AVD_NAME:-RocketDevice}
-  volumes:
-    - /home/${USER}/.android:/root/.android  # AVD データ共有
-    - /tmp/.X11-unix:/tmp/.X11-unix          # 画面表示（オプション）
+    API_BASE_URL: http://api:8000
+    CAPTURE_USERNAME: ${CAPTURE_USERNAME}
+    CAPTURE_PASSWORD: ${CAPTURE_PASSWORD}
+    ADB_SERVER_SOCKET: tcp:host.docker.internal:5037
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   restart: unless-stopped
   depends_on:
     - api
@@ -188,40 +183,29 @@ capture:
 `capture/config.yml`:
 
 ```yaml
-# Android
-avd_name: RocketDevice
-app_package: com.example.rocket
-app_activity: .MainActivity
+adb:
+  # usb の場合は 1 台接続前提。複数接続時はシリアル指定を推奨
+  device: "usb"
 
-# OCR クロップ座標（calibrate.py で調整）
-ocr_region:
-  x: 400
-  y: 600
-  width: 280
-  height: 80
+api:
+  base_url: "http://localhost:8001"
+  username: ""
+  password: ""
 
-# 新ラウンド検出
-crash_threshold: 1.10   # これ以下にリセットされたらクラッシュ判定
-min_multiplier: 1.01
-max_multiplier: 10000.0
-
-# API
-api_url: http://localhost:8001
-poll_interval_sec: 1
+capture:
+  # [y_start, y_end, x_start, x_end]
+  bar_crop: [695, 755, 240, 820]
+  poll_interval: 5
+  scale: 4
 ```
 
 ---
 
-## キャリブレーションツール
+## クロップ座標の調整
 
-初回セットアップ時に倍率テキストの座標を特定するためのツール。
-
-```
-python capture/calibrate.py
-  → 現在のスクリーンショットを表示
-  → マウスドラッグでクロップ範囲を選択
-  → config.yml に自動保存
-```
+`calibrate.py` は未実装のため、`capture.bar_crop` を手動調整する。
+`python capture/ocr.py --debug` で `/tmp/ocr_bar.png` と `/tmp/ocr_thresh.png`
+を確認しながら値を合わせる。
 
 ---
 
@@ -230,13 +214,13 @@ python capture/calibrate.py
 > **実装方針変更**: エミュレーターではなく USB 接続の実機 Android を使用する方式に変更。
 > `docker-compose up capture` ではなく `capture/run.sh` で直接実行する。
 
-- [x] `docker-compose up capture` でエミュレーターが自動起動する
-  - ※ USB 接続の実機方式では `docker compose up -d capture` でコンテナが起動する
+- [ ] `docker-compose up capture` でエミュレーターが自動起動する
+  - ※ USB 接続の実機方式では `docker compose up -d capture` で OCR コンテナが起動する
 - [ ] ログイン → ロケット画面遷移が自動で完了する
 - [x] 1ラウンド完了ごとに倍率が `rounds` テーブルに記録される
 - [x] OCR 精度 95% 以上（20回テストで 100% 達成、HSV 白テキストマスク方式）
-- [ ] エミュレーターがクラッシュしたとき3分以内に自動復旧する
-- [ ] `calibrate.py` でクロップ座標を GUI 調整できる
+- [ ] エミュレーター自動起動/自動復旧（実装方針変更により対象外）
+- [ ] `capture.bar_crop` の自動キャリブレーションツールを提供する
 - [ ] ログが `docs/logs/` に出力される
 
 ---
@@ -247,9 +231,9 @@ python capture/calibrate.py
 |------|---------|
 | アプリパッケージ名 | `adb shell pm list packages` で確認 |
 | APK 入手方法 | 実機からバックアップ or `apkeep` / ストア。`capture/app.apk` に配置 |
-| 倍率テキスト表示座標 | `calibrate.py` で実機確認 |
+| 倍率テキスト表示座標 | `capture.bar_crop` を手動調整して確認 |
 | ログイン画面の座標 | UI Automator で要素名取得推奨 |
-| エミュレーター AVD 名 | Android Studio で作成済みのもの |
+| 接続デバイス識別 | `adb devices` のシリアルを `adb.device` に設定 |
 
 ---
 
@@ -260,8 +244,8 @@ python capture/calibrate.py
 | スクリーンショット取得 | ADB (`adb exec-out screencap`) |
 | 画像処理 | OpenCV (`opencv-python`) |
 | OCR | Tesseract + `pytesseract` |
-| API 送信 | `httpx` (async) |
-| エミュレーター管理 | Android SDK `emulator` CLI |
+| API 送信 | `httpx` |
+| Android 接続 | ADB (`adb exec-out screencap`) |
 | UI 操作 | `adb shell input` / UI Automator |
 | プロセス管理 | systemd + bash |
 
@@ -269,9 +253,8 @@ python capture/calibrate.py
 
 ## 実装優先順
 
-1. `calibrate.py` — 座標特定（最初にやる）
-2. `run.sh` Phase 1 — エミュ起動・画面遷移確認
-3. `ocr.py` Phase 2 — スクショ → 数値抽出確認
-4. `ocr.py` Phase 3 — API 送信・DB 書き込み確認
-5. Phase 4 — 障害復旧
-6. Phase 5 — docker-compose 統合
+1. `capture/config.yml` の `bar_crop` 手動調整
+2. `run.sh` — ADB 接続確認
+3. `ocr.py` — スクショ → 数値抽出確認
+4. `ocr.py` — API 送信・DB 書き込み確認
+5. `docker-compose.yml` — capture 統合
