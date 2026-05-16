@@ -1,7 +1,7 @@
 """
 ML モデル構築スクリプト
-- LightGBM 3クラス分類 (Low / Mid / High)
-- LightGBM 2値分類 (次が Low < 1.5x か？)
+- LightGBM 4クラス分類 (Blue ≤2x / Green 2〜5x / Yellow 5〜10x / Red ≥10x)
+- LightGBM 2値分類 (次が Blue ≤ 2.0x か？)
 
 使い方:
   python3 scripts/ml_model.py
@@ -23,7 +23,7 @@ FEATURE_COLS = [
     'prob_2x', 'prob_5x', 'prob_10x', 'low_streak',
     'slope', 'log_mean', 'log_std', 'momentum',
 ]
-MODEL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'ml_models')
+MODEL_DIR = os.path.join(os.path.dirname(__file__), '..', 'api', 'ml', 'models')
 
 
 def make_features(df: pd.DataFrame, window: int = WINDOW) -> pd.DataFrame:
@@ -52,11 +52,13 @@ def make_features(df: pd.DataFrame, window: int = WINDOW) -> pd.DataFrame:
 
 
 def label_regime(x: float) -> int:
-    if x < 1.5:
-        return 0  # Low
-    if x < 10.0:
-        return 1  # Mid
-    return 2      # High
+    if x <= 2.0:
+        return 0  # Blue  (≤ 2.0x)
+    if x <= 5.0:
+        return 1  # Green (2.01〜5.0x)
+    if x <= 10.0:
+        return 2  # Yellow (5.01〜10.0x)
+    return 3      # Red   (> 10.0x)
 
 
 def train_multiclass(feat_df: pd.DataFrame):
@@ -79,8 +81,8 @@ def train_multiclass(feat_df: pd.DataFrame):
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)
-    print('\n===== 3クラス分類 (Low / Mid / High) =====')
-    print(classification_report(y_test, y_pred, target_names=['Low', 'Mid', 'High']))
+    print('\n===== 4クラス分類 (Blue / Green / Yellow / Red) =====')
+    print(classification_report(y_test, y_pred, target_names=['Blue(≤2x)', 'Green(2-5x)', 'Yellow(5-10x)', 'Red(>10x)']))
 
     feat_imp = pd.Series(model.feature_importances_, index=FEATURE_COLS).sort_values(ascending=False)
     print('特徴量重要度 (上位10):')
@@ -90,7 +92,8 @@ def train_multiclass(feat_df: pd.DataFrame):
 
 
 def train_binary(feat_df: pd.DataFrame):
-    feat_df['label_binary'] = (feat_df['target'] < 1.5).astype(int)
+    # 2値分類: 次が Blue (≤ 2.0x) か？
+    feat_df['label_binary'] = (feat_df['target'] <= 2.0).astype(int)
     X = feat_df[FEATURE_COLS]
     y = feat_df['label_binary']
     X_train, X_test, y_train, y_test = train_test_split(
@@ -110,10 +113,10 @@ def train_binary(feat_df: pd.DataFrame):
 
     proba = model.predict_proba(X_test)[:, 1]
     auc = roc_auc_score(y_test, proba)
-    print(f'\n===== 2値分類 (次が Low < 1.5x か？) =====')
+    print(f'\n===== 2値分類 (次が Blue ≤ 2.0x か？) =====')
     print(f'AUC: {auc:.4f}')
     y_pred = (proba >= 0.5).astype(int)
-    print(classification_report(y_test, y_pred, target_names=['Not-Low', 'Low']))
+    print(classification_report(y_test, y_pred, target_names=['Not-Blue', 'Blue']))
 
     return model, X_test, y_test
 

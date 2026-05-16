@@ -33,10 +33,11 @@ type NoEntryData = {
 
 type MLPrediction = {
   available: boolean;
-  prob_low?: number;
-  prob_mid?: number;
-  prob_high?: number;
-  prob_low_binary?: number;
+  prob_blue?: number;
+  prob_green?: number;
+  prob_yellow?: number;
+  prob_red?: number;
+  prob_blue_binary?: number;
   skip_recommended?: boolean;
   entry_boost?: boolean;
 };
@@ -516,52 +517,78 @@ export default function Home() {
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              {/* ML 予測確率カード */}
+            <div className="space-y-3">
+              {/* 4段階シグナル */}
               {(() => {
                 const ml = data.ml_prediction;
-                const available = ml?.available && ml.prob_low != null;
-                const probLow  = available ? ml!.prob_low!  : null;
-                const probMid  = available ? ml!.prob_mid!  : null;
-                const probHigh = available ? ml!.prob_high! : null;
+                const available = ml?.available && ml.prob_blue != null;
+                const probBlue   = available ? ml!.prob_blue!   : null;
+                const probGreen  = available ? ml!.prob_green!  : null;
+                const probYellow = available ? ml!.prob_yellow! : null;
+                const probRed    = available ? ml!.prob_red!    : null;
+
+                // 最も高い確率のレベルをアクティブに
+                type Level = "blue" | "green" | "yellow" | "red";
+                let level: Level = "blue";
+                if (available) {
+                  const probs: [Level, number][] = [
+                    ["blue",   probBlue!],
+                    ["green",  probGreen!],
+                    ["yellow", probYellow!],
+                    ["red",    probRed!],
+                  ];
+                  level = probs.reduce((a, b) => a[1] >= b[1] ? a : b)[0];
+                }
+
+                const levelDefs: { id: Level; label: string; range: string; active: string; inactive: string; dot: string; text: string; bar: string }[] = [
+                  { id: "blue",   label: "🔵 Blue",   range: "≤ 2.0x",
+                    active:   "bg-blue-900 border-2 border-blue-400",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-40",
+                    dot: "bg-blue-400", text: "text-blue-300", bar: "bg-blue-500" },
+                  { id: "green",  label: "🟢 Green",  range: "2.01〜5.0x",
+                    active:   "bg-green-900 border-2 border-green-400",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-40",
+                    dot: "bg-green-400", text: "text-green-300", bar: "bg-green-500" },
+                  { id: "yellow", label: "🟡 Yellow", range: "5.01〜10.0x",
+                    active:   "bg-yellow-900 border-2 border-yellow-400",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-40",
+                    dot: "bg-yellow-400", text: "text-yellow-300", bar: "bg-yellow-500" },
+                  { id: "red",    label: "🔴 Red",    range: "10.01x〜",
+                    active:   "bg-red-900 border-2 border-red-400",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-40",
+                    dot: "bg-red-400", text: "text-red-300", bar: "bg-red-500" },
+                ];
+
+                const probMap: Record<Level, number | null> = {
+                  blue: probBlue, green: probGreen, yellow: probYellow, red: probRed,
+                };
+
                 return (
                   <>
-                    <div className={`rounded-lg p-3 space-y-2 ${available && ml!.skip_recommended ? "bg-red-950 border border-red-700" : "bg-gray-800"}`}>
-                      <p className="text-xs font-semibold text-red-400">Low 確率</p>
-                      <p className="text-2xl font-bold text-red-400">
-                        {available ? `${(probLow! * 100).toFixed(0)}%` : "—"}
-                      </p>
-                      {available && (
-                        <div className="w-full bg-gray-700 rounded-full h-1.5">
-                          <div className="bg-red-500 h-1.5 rounded-full" style={{ width: `${probLow! * 100}%` }} />
-                        </div>
-                      )}
-                      <p className="text-xs text-gray-500">次が 1.5x 以下になる確率{available && ml!.skip_recommended ? "（スキップ推奨）" : ""}</p>
+                    {/* 4色インジケーター */}
+                    <div className="grid grid-cols-4 gap-2">
+                      {levelDefs.map(lv => {
+                        const isActive = available && level === lv.id;
+                        const prob = probMap[lv.id];
+                        return (
+                          <div key={lv.id} className={`rounded-lg p-3 text-center space-y-1.5 ${isActive ? lv.active : lv.inactive}`}>
+                            <p className={`text-xs font-bold ${isActive ? lv.text : "text-gray-500"}`}>{lv.label}</p>
+                            <p className={`text-xl font-bold ${isActive ? lv.text : "text-gray-600"}`}>
+                              {available && prob != null ? `${(prob * 100).toFixed(0)}%` : "—"}
+                            </p>
+                            {available && prob != null && (
+                              <div className="w-full bg-gray-700 rounded-full h-1">
+                                <div className={`${lv.bar} h-1 rounded-full`} style={{ width: `${prob * 100}%` }} />
+                              </div>
+                            )}
+                            <p className="text-xs text-gray-500">{lv.range}</p>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="bg-gray-800 rounded-lg p-3 space-y-2">
-                      <p className="text-xs font-semibold text-gray-300">Mid 確率</p>
-                      <p className="text-2xl font-bold text-white">
-                        {available ? `${(probMid! * 100).toFixed(0)}%` : "—"}
-                      </p>
-                      {available && (
-                        <div className="w-full bg-gray-700 rounded-full h-1.5">
-                          <div className="bg-gray-400 h-1.5 rounded-full" style={{ width: `${probMid! * 100}%` }} />
-                        </div>
-                      )}
-                      <p className="text-xs text-gray-500">次が 1.5x〜10x の確率</p>
-                    </div>
-                    <div className={`rounded-lg p-3 space-y-2 ${available && ml!.entry_boost ? "bg-green-950 border border-green-700" : "bg-gray-800"}`}>
-                      <p className="text-xs font-semibold text-green-400">High 確率</p>
-                      <p className="text-2xl font-bold text-green-400">
-                        {available ? `${(probHigh! * 100).toFixed(0)}%` : "—"}
-                      </p>
-                      {available && (
-                        <div className="w-full bg-gray-700 rounded-full h-1.5">
-                          <div className="bg-green-500 h-1.5 rounded-full" style={{ width: `${probHigh! * 100}%` }} />
-                        </div>
-                      )}
-                      <p className="text-xs text-gray-500">次が 10x 以上になる確率{available && ml!.entry_boost ? "（エントリー強化）" : ""}</p>
-                    </div>
+                    {!available && (
+                      <p className="text-xs text-gray-500 text-center">ML データ未取得</p>
+                    )}
                   </>
                 );
               })()}

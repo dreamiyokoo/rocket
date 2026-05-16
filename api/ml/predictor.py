@@ -39,12 +39,13 @@ def _load_models() -> None:
 @dataclass
 class MLPrediction:
     available: bool
-    prob_low: float | None = None    # Low  (< 1.5x) 確率
-    prob_mid: float | None = None    # Mid  (1.5〜10x) 確率
-    prob_high: float | None = None   # High (≥ 10x) 確率
-    prob_low_binary: float | None = None  # 2値分類の Low 確率
-    skip_recommended: bool = False   # Low確率 > 60% → スキップ推奨
-    entry_boost: bool = False        # High確率 > 30% → エントリー強化推奨
+    prob_blue: float | None = None    # Blue   (≤ 2.0x) 確率
+    prob_green: float | None = None   # Green  (2.01〜5.0x) 確率
+    prob_yellow: float | None = None  # Yellow (5.01〜10.0x) 確率
+    prob_red: float | None = None     # Red    (> 10.0x) 確率
+    prob_blue_binary: float | None = None  # 2値分類の Blue 確率
+    skip_recommended: bool = False    # Blue確率 > 60% → スキップ推奨
+    entry_boost: bool = False         # Red確率 > 30% → エントリー強化推奨
 
 
 def predict(multipliers: list[float]) -> MLPrediction:
@@ -70,17 +71,19 @@ def predict(multipliers: list[float]) -> MLPrediction:
         logger.warning("ML prediction failed: %s", e)
         return MLPrediction(available=False)
 
-    prob_low = round(float(mc_proba[0]), 4)
-    prob_mid = round(float(mc_proba[1]), 4)
-    prob_high = round(float(mc_proba[2]), 4)
-    prob_low_binary = round(float(bi_proba), 4)
+    prob_blue   = round(float(mc_proba[0]), 4)
+    prob_green  = round(float(mc_proba[1]), 4)
+    prob_yellow = round(float(mc_proba[2]), 4)
+    prob_red    = round(float(mc_proba[3]), 4)
+    prob_blue_binary = round(float(bi_proba), 4)
 
     return MLPrediction(
         available=True,
-        prob_low=prob_low,
-        prob_mid=prob_mid,
-        prob_high=prob_high,
-        prob_low_binary=prob_low_binary,
-        skip_recommended=prob_low_binary > 0.60,
-        entry_boost=prob_high > 0.30,
+        prob_blue=prob_blue,
+        prob_green=prob_green,
+        prob_yellow=prob_yellow,
+        prob_red=prob_red,
+        prob_blue_binary=prob_blue_binary,
+        skip_recommended=prob_blue_binary > 0.60,
+        entry_boost=prob_red > 0.30,
     )

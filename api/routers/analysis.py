@@ -148,16 +148,17 @@ async def get_analysis(
     if ml_result.available:
         response["ml_prediction"] = {
             "available": True,
-            "prob_low": ml_result.prob_low,
-            "prob_mid": ml_result.prob_mid,
-            "prob_high": ml_result.prob_high,
-            "prob_low_binary": ml_result.prob_low_binary,
+            "prob_blue":   ml_result.prob_blue,
+            "prob_green":  ml_result.prob_green,
+            "prob_yellow": ml_result.prob_yellow,
+            "prob_red":    ml_result.prob_red,
+            "prob_blue_binary": ml_result.prob_blue_binary,
             "skip_recommended": ml_result.skip_recommended,
             "entry_boost": ml_result.entry_boost,
         }
         # ML シグナルで entry_ok を上書き
-        # skip_recommended（Low確率 > 60%）→ 強制的に待機
-        # entry_boost（High確率 > 30%）→ 強制的にエントリー推奨
+        # skip_recommended（Blue確率 > 60%）→ 強制的に待機
+        # entry_boost（Red確率 > 30%）→ 強制的にエントリー推奨
         if response.get("recommendation"):
             if ml_result.skip_recommended:
                 response["recommendation"]["entry_ok"] = False
