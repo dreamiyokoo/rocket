@@ -14,12 +14,23 @@ _MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 _multiclass_model = None
 _binary_model = None
-_models_loaded = False
+_last_mtime: float = 0.0
+
+
+def _models_mtime() -> float:
+    """両モデルファイルの最新更新日時を返す。ファイルがなければ 0。"""
+    mc_path = os.path.join(_MODELS_DIR, "multiclass.pkl")
+    bi_path = os.path.join(_MODELS_DIR, "binary.pkl")
+    try:
+        return max(os.path.getmtime(mc_path), os.path.getmtime(bi_path))
+    except OSError:
+        return 0.0
 
 
 def _load_models() -> None:
-    global _multiclass_model, _binary_model, _models_loaded
-    if _models_loaded:
+    global _multiclass_model, _binary_model, _last_mtime
+    current_mtime = _models_mtime()
+    if current_mtime == 0.0 or current_mtime == _last_mtime:
         return
     mc_path = os.path.join(_MODELS_DIR, "multiclass.pkl")
     bi_path = os.path.join(_MODELS_DIR, "binary.pkl")
@@ -28,8 +39,8 @@ def _load_models() -> None:
             _multiclass_model = pickle.load(f)
         with open(bi_path, "rb") as f:
             _binary_model = pickle.load(f)
-        _models_loaded = True
-        logger.info("ML models loaded successfully")
+        _last_mtime = current_mtime
+        logger.info("ML models loaded (mtime=%.0f)", current_mtime)
     except FileNotFoundError as e:
         logger.warning("ML model files not found: %s", e)
     except Exception as e:
@@ -55,7 +66,7 @@ def predict(multipliers: list[float]) -> MLPrediction:
     """
     _load_models()
 
-    if not _models_loaded or len(multipliers) < WINDOW:
+    if _multiclass_model is None or _binary_model is None or len(multipliers) < WINDOW:
         return MLPrediction(available=False)
 
     window = multipliers[-WINDOW:]
