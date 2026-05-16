@@ -74,6 +74,9 @@ class TestGetAnalysis:
         assert "prob_2x" in data
         assert "history" in data["prob_2x"]
         assert "current" in data["prob_2x"]
+        assert "prob_1_2x" in data
+        assert "history" in data["prob_1_2x"]
+        assert "current" in data["prob_1_2x"]
         assert "recommendation" in data
         assert data["recommendation"]["regime"] in ("low", "medium", "high")
         assert "floor_line" in data["recommendation"]

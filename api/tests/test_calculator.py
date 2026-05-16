@@ -54,6 +54,7 @@ def test_prob_all_above_2x():
     assert result.prob_2x == pytest.approx(1.0)
     assert result.prob_5x == pytest.approx(0.0)
     assert result.prob_10x == pytest.approx(0.0)
+    assert result.prob_1_2x == pytest.approx(0.0)
 
 
 def test_prob_all_below_2x():
@@ -62,6 +63,7 @@ def test_prob_all_below_2x():
     assert result.prob_2x == pytest.approx(0.0)
     assert result.prob_5x == pytest.approx(0.0)
     assert result.prob_10x == pytest.approx(0.0)
+    assert result.prob_1_2x == pytest.approx(1.0)
 
 
 def test_prob_mixed():
@@ -72,6 +74,7 @@ def test_prob_mixed():
     assert result.prob_2x == pytest.approx(9 / 18)
     assert result.prob_5x == pytest.approx(4 / 18)
     assert result.prob_10x == pytest.approx(1 / 18)
+    assert result.prob_1_2x == pytest.approx(9 / 18)  # all 1.0 values are ≤ 1.2x
 
 
 # ---------- statistics ----------

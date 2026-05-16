@@ -49,6 +49,7 @@ type AnalysisData = {
   prob_2x?: { current: number; history: number[] };
   prob_5x?: { current: number; history: number[] };
   prob_10x?: { current: number; history: number[] };
+  prob_1_2x?: { current: number; history: number[] };
   moving_avg?: number;
   median?: number;
   std_dev?: number;
@@ -102,6 +103,7 @@ function fmt(v: number) { return v % 1 === 0 ? v.toString() : v.toFixed(2); }
 // ── Charts ───────────────────────────────────────────────────────────────────
 
 function ProbChart({ data }: { data: AnalysisData }) {
+  const h12 = data.prob_1_2x?.history ?? [];
   const h2 = data.prob_2x!.history;
   const h5 = data.prob_5x!.history;
   const h10 = data.prob_10x!.history;
@@ -122,8 +124,9 @@ function ProbChart({ data }: { data: AnalysisData }) {
           <text x={ML - 4} y={yLinear(t, 0, 1) + 4} textAnchor="end" fill="#9ca3af" fontSize="10">{Math.round(t * 100)}%</text>
         </g>
       ))}
+      {h12.length > 0 && pathOf(h12, "#94a3b8")}
       {pathOf(h2, "#4ade80")} {pathOf(h5, "#facc15")} {pathOf(h10, "#f87171")}
-      {n > 0 && <>{labelOf(h2, "#4ade80")} {labelOf(h5, "#facc15")} {labelOf(h10, "#f87171")}</>}
+      {n > 0 && <>{h12.length > 0 && labelOf(h12, "#94a3b8")} {labelOf(h2, "#4ade80")} {labelOf(h5, "#facc15")} {labelOf(h10, "#f87171")}</>}
       <line x1={ML} y1={MT + PH} x2={ML + PW} y2={MT + PH} stroke="#4b5563" />
       <text x={ML} y={VH} fill="#6b7280" fontSize="10">1</text>
       <text x={ML + PW} y={VH} textAnchor="end" fill="#6b7280" fontSize="10">{n}</text>
@@ -644,6 +647,7 @@ export default function Home() {
             <div className="space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex gap-4 text-xs text-gray-400">
+                  {data.prob_1_2x && <span><span className="text-slate-400 font-bold">■</span> 1.2x以下 {pct(data.prob_1_2x.current)}</span>}
                   <span><span className="text-green-400 font-bold">■</span> 2x以上 {pct(data.prob_2x.current)}</span>
                   <span><span className="text-yellow-400 font-bold">■</span> 5x以上 {pct(data.prob_5x.current)}</span>
                   <span><span className="text-red-400 font-bold">■</span> 10x以上 {pct(data.prob_10x.current)}</span>

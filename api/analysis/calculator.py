@@ -25,6 +25,7 @@ NO_ENTRY_LOW_EV_MEDIAN_THRESHOLD  = 1.50  # condition ④: median below this →
 
 @dataclass
 class WindowStats:
+    prob_1_2x: float
     prob_2x: float
     prob_5x: float
     prob_10x: float
@@ -76,6 +77,7 @@ class NoEntry:
 class AnalysisResult:
     ready: bool
     total_rounds: int
+    prob_1_2x: float | None = None
     prob_2x: float | None = None
     prob_5x: float | None = None
     prob_10x: float | None = None
@@ -104,6 +106,7 @@ class AnalysisResult:
 def _window_stats(window: list[float]) -> WindowStats:
     n = len(window)
     return WindowStats(
+        prob_1_2x=sum(1 for x in window if x <= 1.20) / n,
         prob_2x=sum(1 for x in window if x >= 2.0) / n,
         prob_5x=sum(1 for x in window if x >= 5.0) / n,
         prob_10x=sum(1 for x in window if x >= 10.0) / n,
@@ -272,23 +275,28 @@ def calculate(
     macd_fast: int = MACD_FAST_DEFAULT,
     macd_slow: int = MACD_SLOW_DEFAULT,
     macd_signal: int = MACD_SIGNAL_DEFAULT,
+    total_count: int | None = None,
 ) -> AnalysisResult:
-    """Compute analysis from the full list of multipliers (oldest first).
+    """Compute analysis from a recent slice of multipliers (oldest first).
+
+    multipliers should contain at least WINDOW items (ideally MAX_HISTORY+WINDOW).
+    total_count is the actual DB row count for display; defaults to len(multipliers).
 
     RSI and MACD are computed on the moving-average series (one value per
     18-round sliding window), not on raw multipliers, because individual
     crash-game rounds are independent random events.
     """
-    total = len(multipliers)
+    total = total_count if total_count is not None else len(multipliers)
+    local_len = len(multipliers)
 
-    if total < WINDOW:
+    if total < WINDOW or local_len < WINDOW:
         return AnalysisResult(ready=False, total_rounds=total)
 
     recent = multipliers[-WINDOW:]
 
     # Sliding-window history: one entry per round from the 18th onward, capped at MAX_HISTORY
-    history_count = min(total - WINDOW + 1, MAX_HISTORY)
-    history_start = total - WINDOW - (history_count - 1)
+    history_count = min(local_len - WINDOW + 1, MAX_HISTORY)
+    history_start = local_len - WINDOW - (history_count - 1)
     history = [
         _window_stats(multipliers[i : i + WINDOW])
         for i in range(history_start, history_start + history_count)
@@ -300,7 +308,7 @@ def calculate(
     # Bollinger Bands (parallel to chart_data, based on raw multipliers)
     bollinger_chart: list[BollingerPoint | None] = []
     for j in range(chart_len):
-        idx = total - chart_len + j
+        idx = local_len - chart_len + j
         if idx >= WINDOW - 1:
             bb_window = multipliers[idx - WINDOW + 1 : idx + 1]
             bollinger_chart.append(_bollinger(bb_window))
@@ -309,7 +317,7 @@ def calculate(
     bollinger_current = _bollinger(recent)
 
     # ATR (raw multipliers)
-    true_ranges = [abs(multipliers[i] - multipliers[i - 1]) for i in range(1, total)]
+    true_ranges = [abs(multipliers[i] - multipliers[i - 1]) for i in range(1, local_len)]
     atr = round(statistics.mean(true_ranges[-WINDOW:]), 4) if len(true_ranges) >= WINDOW else None
 
     # Moving-average series: the mean multiplier of each 18-round window
@@ -325,6 +333,7 @@ def calculate(
     return AnalysisResult(
         ready=True,
         total_rounds=total,
+        prob_1_2x=history[-1].prob_1_2x,
         prob_2x=history[-1].prob_2x,
         prob_5x=history[-1].prob_5x,
         prob_10x=history[-1].prob_10x,

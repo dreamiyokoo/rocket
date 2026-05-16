@@ -11,6 +11,7 @@ from analysis.calculator import (
     MACD_FAST_DEFAULT,
     MACD_SIGNAL_DEFAULT,
     MACD_SLOW_DEFAULT,
+    MAX_HISTORY,
     RSI_PERIOD_DEFAULT,
     WINDOW,
     calculate,
@@ -51,6 +52,10 @@ def _build_response(result, analyzed_at: str) -> dict:
         "prob_10x": {
             "current": result.prob_10x,
             "history": [h.prob_10x for h in result.history],
+        },
+        "prob_1_2x": {
+            "current": result.prob_1_2x,
+            "history": [h.prob_1_2x for h in result.history],
         },
         "moving_avg": result.moving_avg,
         "median": result.median,
@@ -135,12 +140,24 @@ async def get_analysis(
     except (RedisError, json.JSONDecodeError):
         pass
 
+    # Fetch total count and recent rows separately for performance.
+    # Only the last MAX_HISTORY + WINDOW rows are needed for all computations.
+    _FETCH_LIMIT = MAX_HISTORY + WINDOW
+    count_row = await db.execute(text("SELECT COUNT(*) FROM rounds"))
+    total_count = count_row.scalar() or 0
+
     rows = await db.execute(
-        text("SELECT multiplier FROM rounds ORDER BY recorded_at ASC")
+        text(
+            "SELECT multiplier FROM ("
+            "  SELECT multiplier, recorded_at FROM rounds"
+            "  ORDER BY recorded_at DESC LIMIT :lim"
+            ") sub ORDER BY recorded_at ASC"
+        ),
+        {"lim": _FETCH_LIMIT},
     )
     multipliers = [float(r.multiplier) for r in rows]
 
-    result = calculate(multipliers, rsi_period, macd_fast, macd_slow, macd_signal)
+    result = calculate(multipliers, rsi_period, macd_fast, macd_slow, macd_signal, total_count=total_count)
     ml_result = ml_predict(multipliers)
     analyzed_at = datetime.now(timezone.utc).isoformat()
 
