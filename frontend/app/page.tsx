@@ -532,9 +532,10 @@ export default function Home() {
                 const probYellow = available ? ml!.prob_yellow! : null;
                 const probRed    = available ? ml!.prob_red!    : null;
 
-                // 最も高い確率のレベルをアクティブに
+                // 最も高い確率のレベルをアクティブに、2番目をセミアクティブに
                 type Level = "blue" | "green" | "yellow" | "red";
                 let level: Level = "blue";
+                let level2nd: Level | null = null;
                 if (available) {
                   const probs: [Level, number][] = [
                     ["blue",   probBlue!],
@@ -542,26 +543,32 @@ export default function Home() {
                     ["yellow", probYellow!],
                     ["red",    probRed!],
                   ];
-                  level = probs.reduce((a, b) => a[1] >= b[1] ? a : b)[0];
+                  const sorted = [...probs].sort((a, b) => b[1] - a[1]);
+                  level = sorted[0][0];
+                  level2nd = sorted[1][0];
                 }
 
-                const levelDefs: { id: Level; label: string; range: string; active: string; inactive: string; dot: string; text: string; bar: string }[] = [
+                const levelDefs: { id: Level; label: string; range: string; active: string; semi: string; inactive: string; dot: string; text: string; textSemi: string; bar: string }[] = [
                   { id: "blue",   label: "🔵 Blue",   range: "≤ 2.0x",
                     active:   "bg-blue-900 border-2 border-blue-400",
-                    inactive: "bg-gray-800 border border-gray-700 opacity-40",
-                    dot: "bg-blue-400", text: "text-blue-300", bar: "bg-blue-500" },
+                    semi:     "bg-blue-950 border border-blue-700 opacity-70",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-30",
+                    dot: "bg-blue-400", text: "text-blue-300", textSemi: "text-blue-500", bar: "bg-blue-500" },
                   { id: "green",  label: "🟢 Green",  range: "2.01〜5.0x",
                     active:   "bg-green-900 border-2 border-green-400",
-                    inactive: "bg-gray-800 border border-gray-700 opacity-40",
-                    dot: "bg-green-400", text: "text-green-300", bar: "bg-green-500" },
+                    semi:     "bg-green-950 border border-green-700 opacity-70",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-30",
+                    dot: "bg-green-400", text: "text-green-300", textSemi: "text-green-600", bar: "bg-green-500" },
                   { id: "yellow", label: "🟡 Yellow", range: "5.01〜10.0x",
                     active:   "bg-yellow-900 border-2 border-yellow-400",
-                    inactive: "bg-gray-800 border border-gray-700 opacity-40",
-                    dot: "bg-yellow-400", text: "text-yellow-300", bar: "bg-yellow-500" },
+                    semi:     "bg-yellow-950 border border-yellow-700 opacity-70",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-30",
+                    dot: "bg-yellow-400", text: "text-yellow-300", textSemi: "text-yellow-600", bar: "bg-yellow-500" },
                   { id: "red",    label: "🔴 Red",    range: "10.01x〜",
                     active:   "bg-red-900 border-2 border-red-400",
-                    inactive: "bg-gray-800 border border-gray-700 opacity-40",
-                    dot: "bg-red-400", text: "text-red-300", bar: "bg-red-500" },
+                    semi:     "bg-red-950 border border-red-700 opacity-70",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-30",
+                    dot: "bg-red-400", text: "text-red-300", textSemi: "text-red-600", bar: "bg-red-500" },
                 ];
 
                 const probMap: Record<Level, number | null> = {
@@ -574,11 +581,14 @@ export default function Home() {
                     <div className="grid grid-cols-4 gap-2">
                       {levelDefs.map(lv => {
                         const isActive = available && level === lv.id;
+                        const isSemi   = available && !isActive && level2nd === lv.id;
                         const prob = probMap[lv.id];
+                        const cardClass = isActive ? lv.active : isSemi ? lv.semi : lv.inactive;
+                        const textClass = isActive ? lv.text : isSemi ? lv.textSemi : "text-gray-600";
                         return (
-                          <div key={lv.id} className={`rounded-lg p-3 text-center space-y-1.5 ${isActive ? lv.active : lv.inactive}`}>
-                            <p className={`text-xs font-bold ${isActive ? lv.text : "text-gray-500"}`}>{lv.label}</p>
-                            <p className={`text-xl font-bold ${isActive ? lv.text : "text-gray-600"}`}>
+                          <div key={lv.id} className={`rounded-lg p-3 text-center space-y-1.5 ${cardClass}`}>
+                            <p className={`text-xs font-bold ${textClass}`}>{lv.label}</p>
+                            <p className={`text-xl font-bold ${textClass}`}>
                               {available && prob != null ? `${(prob * 100).toFixed(0)}%` : "—"}
                             </p>
                             {available && prob != null && (
