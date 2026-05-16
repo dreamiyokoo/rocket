@@ -31,6 +31,17 @@ type NoEntryData = {
   median_value: number;
 };
 
+type MLPrediction = {
+  available: boolean;
+  prob_blue?: number;
+  prob_green?: number;
+  prob_yellow?: number;
+  prob_red?: number;
+  prob_blue_binary?: number;
+  skip_recommended?: boolean;
+  entry_boost?: boolean;
+};
+
 type AnalysisData = {
   ready: boolean;
   total_rounds: number;
@@ -50,6 +61,7 @@ type AnalysisData = {
   chart_data?: { index: number; value: number }[];
   recommendation?: Recommendation;
   no_entry?: NoEntryData;
+  ml_prediction?: MLPrediction;
   analyzed_at?: string;
 };
 
@@ -298,11 +310,14 @@ export default function Home() {
   };
 
   // データ更新のたびに entry_ok が true なら通知音を鳴らす
+  // 最新倍率 ≤ 2.0x → blue.mp3 / 2.01x以上 → notify.mp3
   useEffect(() => {
     const entryOk = data?.recommendation?.entry_ok ?? false;
     if (soundEnabled && entryOk) {
       try {
-        const audio = new Audio("/notify.mp3");
+        const lastMultiplier = data?.chart_data?.at(-1)?.value ?? 999;
+        const soundFile = lastMultiplier <= 2.0 ? "/blue.mp3" : "/notify.mp3";
+        const audio = new Audio(soundFile);
         audio.play().catch(() => {/* autoplay ブロック時は無視 */});
       } catch { /* Audio 非対応環境では無視 */ }
     }
@@ -329,7 +344,9 @@ export default function Home() {
               setSoundEnabled(next);
               if (next) {
                 try {
-                  const audio = new Audio("/notify.mp3");
+                  const lastMultiplier = data?.chart_data?.at(-1)?.value ?? 999;
+                  const soundFile = lastMultiplier <= 2.0 ? "/blue.mp3" : "/notify.mp3";
+                  const audio = new Audio(soundFile);
                   audio.play().catch(() => {});
                 } catch { /* ignore */ }
               }
@@ -505,22 +522,91 @@ export default function Home() {
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
-                <p className="text-xs font-semibold text-blue-400">下限ライン</p>
-                <p className="text-2xl font-bold text-blue-400">{fmt(rec.floor_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
-                <p className="text-xs text-gray-500">低倍率が続く局面で、これ以上になったら即キャッシュアウト</p>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
-                <p className="text-xs font-semibold text-gray-300">50% 期待値</p>
-                <p className="text-2xl font-bold text-white">{data.median != null ? fmt(data.median) : "—"}<span className="text-sm text-gray-400 ml-1">x</span></p>
-                <p className="text-xs text-gray-500">直近18件の中央値 — 2回に1回はこの倍率以上に到達</p>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
-                <p className="text-xs font-semibold text-green-400">利確ライン</p>
-                <p className="text-2xl font-bold text-green-400">{fmt(rec.target_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
-                <p className="text-xs text-gray-500">波が来た局面で狙う利確目標。欲張らずここで逃す</p>
-              </div>
+            <div className="space-y-3">
+              {/* 4段階シグナル */}
+              {(() => {
+                const ml = data.ml_prediction;
+                const available = ml?.available && ml.prob_blue != null;
+                const probBlue   = available ? ml!.prob_blue!   : null;
+                const probGreen  = available ? ml!.prob_green!  : null;
+                const probYellow = available ? ml!.prob_yellow! : null;
+                const probRed    = available ? ml!.prob_red!    : null;
+
+                // 最も高い確率のレベルをアクティブに、2番目をセミアクティブに
+                type Level = "blue" | "green" | "yellow" | "red";
+                let level: Level = "blue";
+                let level2nd: Level | null = null;
+                if (available) {
+                  const probs: [Level, number][] = [
+                    ["blue",   probBlue!],
+                    ["green",  probGreen!],
+                    ["yellow", probYellow!],
+                    ["red",    probRed!],
+                  ];
+                  const sorted = [...probs].sort((a, b) => b[1] - a[1]);
+                  level = sorted[0][0];
+                  level2nd = sorted[1][0];
+                }
+
+                const levelDefs: { id: Level; label: string; range: string; active: string; semi: string; inactive: string; dot: string; text: string; textSemi: string; bar: string }[] = [
+                  { id: "blue",   label: "🔵 Blue",   range: "≤ 2.0x",
+                    active:   "bg-blue-900 border-2 border-blue-400",
+                    semi:     "bg-blue-950 border border-blue-700 opacity-70",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-30",
+                    dot: "bg-blue-400", text: "text-blue-300", textSemi: "text-blue-500", bar: "bg-blue-500" },
+                  { id: "green",  label: "🟢 Green",  range: "2.01〜5.0x",
+                    active:   "bg-green-900 border-2 border-green-400",
+                    semi:     "bg-green-950 border border-green-700 opacity-70",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-30",
+                    dot: "bg-green-400", text: "text-green-300", textSemi: "text-green-600", bar: "bg-green-500" },
+                  { id: "yellow", label: "🟡 Yellow", range: "5.01〜10.0x",
+                    active:   "bg-yellow-900 border-2 border-yellow-400",
+                    semi:     "bg-yellow-950 border border-yellow-700 opacity-70",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-30",
+                    dot: "bg-yellow-400", text: "text-yellow-300", textSemi: "text-yellow-600", bar: "bg-yellow-500" },
+                  { id: "red",    label: "🔴 Red",    range: "10.01x〜",
+                    active:   "bg-red-900 border-2 border-red-400",
+                    semi:     "bg-red-950 border border-red-700 opacity-70",
+                    inactive: "bg-gray-800 border border-gray-700 opacity-30",
+                    dot: "bg-red-400", text: "text-red-300", textSemi: "text-red-600", bar: "bg-red-500" },
+                ];
+
+                const probMap: Record<Level, number | null> = {
+                  blue: probBlue, green: probGreen, yellow: probYellow, red: probRed,
+                };
+
+                return (
+                  <>
+                    {/* 4色インジケーター */}
+                    <div className="grid grid-cols-4 gap-2">
+                      {levelDefs.map(lv => {
+                        const isActive = available && level === lv.id;
+                        const isSemi   = available && !isActive && level2nd === lv.id;
+                        const prob = probMap[lv.id];
+                        const cardClass = isActive ? lv.active : isSemi ? lv.semi : lv.inactive;
+                        const textClass = isActive ? lv.text : isSemi ? lv.textSemi : "text-gray-600";
+                        return (
+                          <div key={lv.id} className={`rounded-lg p-3 text-center space-y-1.5 ${cardClass}`}>
+                            <p className={`text-xs font-bold ${textClass}`}>{lv.label}</p>
+                            <p className={`text-xl font-bold ${textClass}`}>
+                              {available && prob != null ? `${(prob * 100).toFixed(0)}%` : "—"}
+                            </p>
+                            {available && prob != null && (
+                              <div className="w-full bg-gray-700 rounded-full h-1">
+                                <div className={`${lv.bar} h-1 rounded-full`} style={{ width: `${prob * 100}%` }} />
+                              </div>
+                            )}
+                            <p className="text-xs text-gray-500">{lv.range}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {!available && (
+                      <p className="text-xs text-gray-500 text-center">ML データ未取得</p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </section>
         );

@@ -17,6 +17,7 @@ from analysis.calculator import (
 )
 from core.database import get_db
 from core.redis import get_redis
+from ml.predictor import predict as ml_predict
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
@@ -140,9 +141,31 @@ async def get_analysis(
     multipliers = [float(r.multiplier) for r in rows]
 
     result = calculate(multipliers, rsi_period, macd_fast, macd_slow, macd_signal)
+    ml_result = ml_predict(multipliers)
     analyzed_at = datetime.now(timezone.utc).isoformat()
 
     response = _build_response(result, analyzed_at)
+    if ml_result.available:
+        response["ml_prediction"] = {
+            "available": True,
+            "prob_blue":   ml_result.prob_blue,
+            "prob_green":  ml_result.prob_green,
+            "prob_yellow": ml_result.prob_yellow,
+            "prob_red":    ml_result.prob_red,
+            "prob_blue_binary": ml_result.prob_blue_binary,
+            "skip_recommended": ml_result.skip_recommended,
+            "entry_boost": ml_result.entry_boost,
+        }
+        # ML シグナルで entry_ok を上書き
+        # skip_recommended（Blue確率 > 60%）→ 強制的に待機
+        # entry_boost（Red確率 > 30%）→ 強制的にエントリー推奨
+        if response.get("recommendation"):
+            if ml_result.skip_recommended:
+                response["recommendation"]["entry_ok"] = False
+            elif ml_result.entry_boost:
+                response["recommendation"]["entry_ok"] = True
+    else:
+        response["ml_prediction"] = {"available": False}
     try:
         await redis.setex(key, CACHE_TTL, json.dumps(response))
     except RedisError:

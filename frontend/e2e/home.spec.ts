@@ -30,6 +30,19 @@ async function mockReadyAnalysisWithRecommendation(page: Page) {
           regime: "medium",
           floor_line: 1.32,
           target_line: 3.41,
+          flow_state: "warm",
+          stake_scale: 1.0,
+          entry_ok: true,
+        },
+        ml_prediction: {
+          available: true,
+          prob_blue: 0.55,
+          prob_green: 0.25,
+          prob_yellow: 0.12,
+          prob_red: 0.08,
+          prob_blue_binary: 0.55,
+          skip_recommended: false,
+          entry_boost: false,
         },
         analyzed_at: "2026-01-01T00:00:00Z",
       }),
@@ -75,6 +88,19 @@ async function mockReadyAnalysisWithNoEntry(page: Page, noEntryReasons: string[]
           regime: "medium",
           floor_line: 1.32,
           target_line: 3.41,
+          flow_state: "warm",
+          stake_scale: 1.0,
+          entry_ok: false,
+        },
+        ml_prediction: {
+          available: true,
+          prob_blue: 0.55,
+          prob_green: 0.25,
+          prob_yellow: 0.12,
+          prob_red: 0.08,
+          prob_blue_binary: 0.55,
+          skip_recommended: false,
+          entry_boost: false,
         },
         no_entry: {
           active: noEntryReasons.length > 0,
@@ -114,8 +140,8 @@ test("home page renders recommendation panel values", async ({ page }) => {
 
   await expect(page.getByText("推奨ライン")).toBeVisible();
   await expect(page.getByText("中ボラ")).toBeVisible();
-  await expect(page.getByText("1.32")).toBeVisible();
-  await expect(page.getByText("3.41")).toBeVisible();
+  await expect(page.getByText("🔵 Blue")).toBeVisible();
+  await expect(page.getByText("🟢 Green")).toBeVisible();
 });
 
 test("no-entry indicator shows green when no reasons", async ({ page }) => {

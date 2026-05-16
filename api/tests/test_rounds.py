@@ -126,12 +126,30 @@ class TestPostRounds:
         )
         assert response.status_code == 422
 
+    def test_post_rounds_below_min_returns_422(self):
+        app.dependency_overrides[get_current_user] = lambda: _CURRENT_USER
+
+        response = TestClient(app).post(
+            "/api/v1/rounds",
+            json={"values": [1.00]},
+        )
+        assert response.status_code == 422
+
+    def test_post_rounds_above_max_returns_422(self):
+        app.dependency_overrides[get_current_user] = lambda: _CURRENT_USER
+
+        response = TestClient(app).post(
+            "/api/v1/rounds",
+            json={"values": [501.01]},
+        )
+        assert response.status_code == 422
+
     def test_post_rounds_too_many_values_returns_422(self):
         app.dependency_overrides[get_current_user] = lambda: _CURRENT_USER
 
         response = TestClient(app).post(
             "/api/v1/rounds",
-            json={"values": [1.0] * 1001},
+            json={"values": [1.5] * 1001},
         )
         assert response.status_code == 422
 

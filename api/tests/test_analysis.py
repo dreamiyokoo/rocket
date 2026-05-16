@@ -1,5 +1,6 @@
 import json
 import os
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET", "test-secret-key-for-testing-purposes-only-xx")
@@ -14,6 +15,7 @@ from redis.exceptions import RedisError  # noqa: E402
 from core.database import get_db  # noqa: E402
 from core.redis import get_redis  # noqa: E402
 from main import app  # noqa: E402
+from ml.predictor import MLPrediction  # noqa: E402
 
 WINDOW = 18
 
@@ -141,3 +143,96 @@ class TestGetAnalysis:
         assert response.json()["ready"] is True
         broken_redis.get.assert_awaited_once()
         mock_db.execute.assert_awaited_once()
+
+
+class TestGetAnalysisMLPrediction:
+    def test_ml_prediction_unavailable(self):
+        """ml_predict が利用不可の場合、ml_prediction.available == False を返す"""
+        app.dependency_overrides[get_db] = lambda: _make_db([2.0] * WINDOW)
+        app.dependency_overrides[get_redis] = lambda: _make_redis()
+        unavailable = MLPrediction(available=False)
+        with patch("routers.analysis.ml_predict", return_value=unavailable):
+            data = TestClient(app).get("/api/v1/analysis").json()
+        assert data["ml_prediction"] == {"available": False}
+
+    def test_ml_prediction_available_shape(self):
+        """ml_predict が利用可能の場合、全フィールドを含む ml_prediction を返す"""
+        app.dependency_overrides[get_db] = lambda: _make_db([2.0] * WINDOW)
+        app.dependency_overrides[get_redis] = lambda: _make_redis()
+        pred = MLPrediction(
+            available=True,
+            prob_blue=0.50,
+            prob_green=0.25,
+            prob_yellow=0.15,
+            prob_red=0.10,
+            prob_blue_binary=0.50,
+            skip_recommended=False,
+            entry_boost=False,
+        )
+        with patch("routers.analysis.ml_predict", return_value=pred):
+            data = TestClient(app).get("/api/v1/analysis").json()
+        ml = data["ml_prediction"]
+        assert ml["available"] is True
+        assert ml["prob_blue"] == 0.50
+        assert ml["prob_green"] == 0.25
+        assert ml["prob_yellow"] == 0.15
+        assert ml["prob_red"] == 0.10
+        assert ml["prob_blue_binary"] == 0.50
+        assert ml["skip_recommended"] is False
+        assert ml["entry_boost"] is False
+
+    def test_ml_skip_recommended_overrides_entry_ok_to_false(self):
+        """skip_recommended=True のとき recommendation.entry_ok が False に上書きされる"""
+        app.dependency_overrides[get_db] = lambda: _make_db([2.0] * WINDOW)
+        app.dependency_overrides[get_redis] = lambda: _make_redis()
+        pred = MLPrediction(
+            available=True,
+            prob_blue=0.70,
+            prob_green=0.15,
+            prob_yellow=0.10,
+            prob_red=0.05,
+            prob_blue_binary=0.70,
+            skip_recommended=True,
+            entry_boost=False,
+        )
+        with patch("routers.analysis.ml_predict", return_value=pred):
+            data = TestClient(app).get("/api/v1/analysis").json()
+        assert data["recommendation"]["entry_ok"] is False
+        assert data["ml_prediction"]["skip_recommended"] is True
+
+    def test_ml_entry_boost_overrides_entry_ok_to_true(self):
+        """entry_boost=True のとき recommendation.entry_ok が True に上書きされる"""
+        app.dependency_overrides[get_db] = lambda: _make_db([2.0] * WINDOW)
+        app.dependency_overrides[get_redis] = lambda: _make_redis()
+        pred = MLPrediction(
+            available=True,
+            prob_blue=0.20,
+            prob_green=0.20,
+            prob_yellow=0.25,
+            prob_red=0.35,
+            prob_blue_binary=0.20,
+            skip_recommended=False,
+            entry_boost=True,
+        )
+        with patch("routers.analysis.ml_predict", return_value=pred):
+            data = TestClient(app).get("/api/v1/analysis").json()
+        assert data["recommendation"]["entry_ok"] is True
+        assert data["ml_prediction"]["entry_boost"] is True
+
+    def test_ml_skip_recommended_takes_priority_over_entry_boost(self):
+        """skip_recommended と entry_boost が同時に True でも skip_recommended が優先される"""
+        app.dependency_overrides[get_db] = lambda: _make_db([2.0] * WINDOW)
+        app.dependency_overrides[get_redis] = lambda: _make_redis()
+        pred = MLPrediction(
+            available=True,
+            prob_blue=0.65,
+            prob_green=0.10,
+            prob_yellow=0.10,
+            prob_red=0.15,
+            prob_blue_binary=0.65,
+            skip_recommended=True,
+            entry_boost=True,
+        )
+        with patch("routers.analysis.ml_predict", return_value=pred):
+            data = TestClient(app).get("/api/v1/analysis").json()
+        assert data["recommendation"]["entry_ok"] is False
