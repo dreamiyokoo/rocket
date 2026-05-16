@@ -6,7 +6,7 @@ import pickle
 import logging
 from dataclasses import dataclass
 
-from ml.features import WINDOW, FEATURE_COLS, make_feature_vector
+from ml.features import WINDOW, make_feature_vector
 
 logger = logging.getLogger(__name__)
 
