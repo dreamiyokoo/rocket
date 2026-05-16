@@ -155,6 +155,14 @@ async def get_analysis(
             "skip_recommended": ml_result.skip_recommended,
             "entry_boost": ml_result.entry_boost,
         }
+        # ML シグナルで entry_ok を上書き
+        # skip_recommended（Low確率 > 60%）→ 強制的に待機
+        # entry_boost（High確率 > 30%）→ 強制的にエントリー推奨
+        if response.get("recommendation"):
+            if ml_result.skip_recommended:
+                response["recommendation"]["entry_ok"] = False
+            elif ml_result.entry_boost:
+                response["recommendation"]["entry_ok"] = True
     else:
         response["ml_prediction"] = {"available": False}
     try:
