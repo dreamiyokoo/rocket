@@ -17,6 +17,7 @@ from analysis.calculator import (
 )
 from core.database import get_db
 from core.redis import get_redis
+from ml.predictor import predict as ml_predict
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
@@ -140,9 +141,22 @@ async def get_analysis(
     multipliers = [float(r.multiplier) for r in rows]
 
     result = calculate(multipliers, rsi_period, macd_fast, macd_slow, macd_signal)
+    ml_result = ml_predict(multipliers)
     analyzed_at = datetime.now(timezone.utc).isoformat()
 
     response = _build_response(result, analyzed_at)
+    if ml_result.available:
+        response["ml_prediction"] = {
+            "available": True,
+            "prob_low": ml_result.prob_low,
+            "prob_mid": ml_result.prob_mid,
+            "prob_high": ml_result.prob_high,
+            "prob_low_binary": ml_result.prob_low_binary,
+            "skip_recommended": ml_result.skip_recommended,
+            "entry_boost": ml_result.entry_boost,
+        }
+    else:
+        response["ml_prediction"] = {"available": False}
     try:
         await redis.setex(key, CACHE_TTL, json.dumps(response))
     except RedisError:
