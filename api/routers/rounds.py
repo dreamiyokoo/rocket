@@ -16,6 +16,9 @@ READY_THRESHOLD = 18
 MAX_LIMIT = 72
 MAX_POST_VALUES = 1000
 
+MULTIPLIER_MIN = 1.01
+MULTIPLIER_MAX = 501.00
+
 
 class RoundsPostRequest(BaseModel):
     values: list[float]
@@ -27,8 +30,11 @@ class RoundsPostRequest(BaseModel):
             raise ValueError("values must not be empty")
         if len(v) > MAX_POST_VALUES:
             raise ValueError(f"values must contain at most {MAX_POST_VALUES} items")
-        if any(x <= 0 for x in v):
-            raise ValueError("each value must be greater than 0")
+        invalid = [x for x in v if not (MULTIPLIER_MIN <= x <= MULTIPLIER_MAX)]
+        if invalid:
+            raise ValueError(
+                f"each value must be between {MULTIPLIER_MIN} and {MULTIPLIER_MAX}, got: {invalid}"
+            )
         return v
 
 
