@@ -110,14 +110,14 @@ def test_history_length_grows():
     assert len(result.history) == 6
 
 
-def test_history_capped_at_72():
-    result = _make([1.5] * (WINDOW + 100))
-    assert len(result.history) == 72
+def test_history_capped_at_300():
+    result = _make([1.5] * (WINDOW + 400))
+    assert len(result.history) == 300
 
 
-def test_chart_data_capped_at_72():
-    result = _make([1.5] * 100)
-    assert len(result.chart_data) == 72
+def test_chart_data_capped_at_300():
+    result = _make([1.5] * 400)
+    assert len(result.chart_data) == 300
 
 
 def test_chart_data_fewer_than_72():

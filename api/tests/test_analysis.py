@@ -99,12 +99,12 @@ class TestGetAnalysis:
         assert data["ready"] is False
         assert "no_entry" not in data
 
-    def test_chart_data_max_72(self):
-        values = [1.5] * 100
+    def test_chart_data_max_300(self):
+        values = [1.5] * 400
         app.dependency_overrides[get_db] = lambda: _make_db(values)
         app.dependency_overrides[get_redis] = lambda: _make_redis()
         data = TestClient(app).get("/api/v1/analysis").json()
-        assert len(data["chart_data"]) == 72
+        assert len(data["chart_data"]) == 300
 
     def test_chart_data_index_starts_at_1(self):
         values = [1.5] * WINDOW
