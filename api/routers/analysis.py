@@ -57,6 +57,10 @@ def _build_response(result, analyzed_at: str) -> dict:
             "current": result.prob_1_2x,
             "history": [h.prob_1_2x for h in result.history],
         },
+        "prob_2_0x": {
+            "current": result.prob_2_0x,
+            "history": [h.prob_2_0x for h in result.history],
+        },
         "moving_avg": result.moving_avg,
         "median": result.median,
         "std_dev": result.std_dev,

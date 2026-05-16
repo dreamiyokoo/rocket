@@ -26,6 +26,7 @@ NO_ENTRY_LOW_EV_MEDIAN_THRESHOLD  = 1.50  # condition ④: median below this →
 @dataclass
 class WindowStats:
     prob_1_2x: float
+    prob_2_0x: float
     prob_2x: float
     prob_5x: float
     prob_10x: float
@@ -78,6 +79,7 @@ class AnalysisResult:
     ready: bool
     total_rounds: int
     prob_1_2x: float | None = None
+    prob_2_0x: float | None = None
     prob_2x: float | None = None
     prob_5x: float | None = None
     prob_10x: float | None = None
@@ -107,6 +109,7 @@ def _window_stats(window: list[float]) -> WindowStats:
     n = len(window)
     return WindowStats(
         prob_1_2x=sum(1 for x in window if x <= 1.20) / n,
+        prob_2_0x=sum(1 for x in window if x <= 2.00) / n,
         prob_2x=sum(1 for x in window if x >= 2.0) / n,
         prob_5x=sum(1 for x in window if x >= 5.0) / n,
         prob_10x=sum(1 for x in window if x >= 10.0) / n,
@@ -334,6 +337,7 @@ def calculate(
         ready=True,
         total_rounds=total,
         prob_1_2x=history[-1].prob_1_2x,
+        prob_2_0x=history[-1].prob_2_0x,
         prob_2x=history[-1].prob_2x,
         prob_5x=history[-1].prob_5x,
         prob_10x=history[-1].prob_10x,

@@ -50,6 +50,7 @@ type AnalysisData = {
   prob_5x?: { current: number; history: number[] };
   prob_10x?: { current: number; history: number[] };
   prob_1_2x?: { current: number; history: number[] };
+  prob_2_0x?: { current: number; history: number[] };
   moving_avg?: number;
   median?: number;
   std_dev?: number;
@@ -625,6 +626,35 @@ export default function Home() {
                         {high ? "⚠" : mid ? "△" : "✓"}
                       </span>
                       <span className="text-xs text-gray-300">1.20x以下確率</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="w-24 bg-gray-700 rounded-full h-1.5">
+                        <div
+                          className={`h-1.5 rounded-full ${high ? "bg-red-500" : mid ? "bg-yellow-500" : "bg-slate-500"}`}
+                          style={{ width: `${Math.min(p * 100, 100)}%` }}
+                        />
+                      </div>
+                      <span className={`text-sm font-bold font-mono ${high ? "text-red-300" : mid ? "text-yellow-300" : "text-gray-300"}`}>
+                        {pct(p)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* 2.0x以下確率 */}
+              {data.prob_2_0x != null && (() => {
+                const p = data.prob_2_0x.current ?? 0;
+                const high = p >= 0.60;
+                const mid  = p >= 0.45;
+                return (
+                  <div className={`flex items-center justify-between rounded-lg px-3 py-2 ${
+                    high ? "bg-red-950 border border-red-800" : mid ? "bg-yellow-950 border border-yellow-800" : "bg-gray-800 border border-gray-700"
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-bold ${high ? "text-red-400" : mid ? "text-yellow-400" : "text-gray-400"}`}>
+                        {high ? "⚠" : mid ? "△" : "✓"}
+                      </span>
+                      <span className="text-xs text-gray-300">2.00x以下確率</span>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="w-24 bg-gray-700 rounded-full h-1.5">
