@@ -32,8 +32,8 @@ BET2_AMOUNT = 50
 BET2_TARGET = 3.5
 
 # MLしきい値
-HIGH_THRESH = 0.30     # High確率 > 30% でエントリー
-LOW_SKIP_THRESH = 0.60 # Low確率 > 60% でスキップ
+RED_THRESH = 0.30      # Red確率 > 30% でエントリー（高倍率期待）
+BLUE_SKIP_THRESH = 0.60 # Blue確率 > 60% でスキップ（低倍率多い）
 
 # ルールベース設定
 RB_WINDOW = 18
@@ -161,12 +161,14 @@ def main():
     actuals = feat_df['target'].tolist()
 
     # 全データで予測（train/testを気にせずシミュレーション用に全件使う）
-    mc_proba = mc_model.predict_proba(X)  # [Low, Mid, High]
-    bi_proba = bi_model.predict_proba(X)[:, 1]  # Low確率
+    # 4クラス: Blue(≤2.0x), Green(2.01-5.0x), Yellow(5.01-10.0x), Red(>10.0x)
+    mc_proba = mc_model.predict_proba(X)  # [Blue, Green, Yellow, Red]
+    bi_proba = bi_model.predict_proba(X)[:, 1]  # Blue確率（2値分類）
 
-    prob_low  = mc_proba[:, 0]
-    prob_mid  = mc_proba[:, 1]
-    prob_high = mc_proba[:, 2]
+    prob_blue   = mc_proba[:, 0]
+    prob_green  = mc_proba[:, 1]
+    prob_yellow = mc_proba[:, 2]
+    prob_red    = mc_proba[:, 3]
 
     n = len(feat_df)
 
@@ -195,24 +197,24 @@ def main():
     rb_entries = list(rb_entries)
     rb_scales  = list(rb_scales)
 
-    # ML戦略A: High確率 > HIGH_THRESH でエントリー
-    ml_a_entries = [p > HIGH_THRESH for p in prob_high]
+    # ML戦略A: Red確率 > RED_THRESH でエントリー（高倍率期待）
+    ml_a_entries = [p > RED_THRESH for p in prob_red]
     ml_a_scales  = [1.0] * n
 
-    # ML戦略B: Low確率 > LOW_SKIP_THRESH ならスキップ（それ以外はエントリー）
-    ml_b_entries = [p <= LOW_SKIP_THRESH for p in bi_proba]
+    # ML戦略B: Blue確率 > BLUE_SKIP_THRESH ならスキップ（それ以外はエントリー）
+    ml_b_entries = [p <= BLUE_SKIP_THRESH for p in bi_proba]
     ml_b_scales  = [1.0] * n
 
-    # ML戦略C: ルールベース + ML Low確率スキップを組み合わせ
-    ml_c_entries = [rb and (bi_proba[i] <= LOW_SKIP_THRESH) for i, rb in enumerate(rb_entries)]
+    # ML戦略C: ルールベース + ML Blue確率スキップを組み合わせ
+    ml_c_entries = [rb and (bi_proba[i] <= BLUE_SKIP_THRESH) for i, rb in enumerate(rb_entries)]
     ml_c_scales  = rb_scales[:]
 
-    # ML戦略D: High確率に応じてスケール（0〜1.5倍）
+    # ML戦略D: Red確率に応じてスケール（0〜1.5倍）
     def ml_d_scale(i):
-        ph = prob_high[i]
-        if ph >= 0.40:
+        pr = prob_red[i]
+        if pr >= 0.40:
             return 1.5
-        elif ph >= 0.30:
+        elif pr >= 0.30:
             return 1.2
         else:
             return 1.0
@@ -227,10 +229,10 @@ def main():
     for strat in [
         run_strategy('ベースライン（全ラウンド固定）', baseline_entries, actuals, baseline_scales),
         run_strategy('ルールベース⑤（No-Entry+流れ+スケール）', rb_entries, actuals, rb_scales),
-        run_strategy('ML-A（High確率>30%でエントリー）', ml_a_entries, actuals, ml_a_scales),
-        run_strategy('ML-B（Low確率>60%でスキップ）', ml_b_entries, actuals, ml_b_scales),
-        run_strategy('ML-C（ルールベース + ML-Lowスキップ）', ml_c_entries, actuals, ml_c_scales),
-        run_strategy('ML-D（High確率でスケール調整）', ml_d_entries, actuals, ml_d_scales),
+        run_strategy('ML-A（Red確率>30%でエントリー）', ml_a_entries, actuals, ml_a_scales),
+        run_strategy('ML-B（Blue確率>60%でスキップ）', ml_b_entries, actuals, ml_b_scales),
+        run_strategy('ML-C（ルールベース + ML-Blueスキップ）', ml_c_entries, actuals, ml_c_scales),
+        run_strategy('ML-D（Red確率でスケール調整）', ml_d_entries, actuals, ml_d_scales),
     ]:
         print_result(strat)
         results.append(strat)
@@ -249,7 +251,7 @@ def write_results_md(results: list, data_count: int, path: str):
         '',
         f'- データ件数: {data_count} ラウンド',
         f'- ベット構成: Bet1={BET1_AMOUNT}コイン@{BET1_TARGET}x / Bet2={BET2_AMOUNT}コイン@{BET2_TARGET}x',
-        f'- MLしきい値: High確率>{HIGH_THRESH} でエントリー / Low確率>{LOW_SKIP_THRESH} でスキップ',
+        f'- MLしきい値: Red確率>{RED_THRESH} でエントリー / Blue確率>{BLUE_SKIP_THRESH} でスキップ',
         '',
         '## 戦略別結果',
         '',
@@ -273,7 +275,7 @@ def write_results_md(results: list, data_count: int, path: str):
         '## 注意',
         '',
         '- 2826件はデータ不足ライン（推奨5000件以上）',
-        '- 3クラス分類精度: ~35%、2値分類AUC: ~0.48 と現段階では低精度',
+        '- 4クラス分類精度: ~35%、2値分類AUC: ~0.48 と現段階では低精度',
         '- 5000件超後に再学習することで精度向上が期待される',
     ]
 
