@@ -168,8 +168,14 @@ function MacdChart({ macd }: { macd: (MacdPoint | null)[] }) {
   const n = macd.length;
   const vals = macd.flatMap((p) => p ? [p.macd, p.signal ?? p.macd, p.histogram ?? 0] : []);
   if (vals.length === 0) return null;
-  const lo = Math.min(...vals) - Math.abs(Math.min(...vals)) * 0.1 - 0.01;
-  const hi = Math.max(...vals) + Math.abs(Math.max(...vals)) * 0.1 + 0.01;
+  // MAD（中央絶対偏差）ベースの堅牢なスケール計算
+  const sorted = [...vals].sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)];
+  const mads = sorted.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
+  const mad = mads[Math.floor(mads.length / 2)];
+  const spread = Math.max(mad * 5, 0.01);
+  const lo = med - spread;
+  const hi = med + spread;
   const yM = (v: number) => yLinear(v, lo, hi);
   const zero = yM(0);
   const barW = Math.max(1, (PW / n) * 0.6);
@@ -231,8 +237,10 @@ export default function Home() {
   const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<ChartTab>("prob");
+  const [soundEnabled, setSoundEnabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paramsRef = useRef<Params>(params);
+  const prevEntryOkRef = useRef<boolean>(false);
 
   useEffect(() => { paramsRef.current = params; }, [params]);
 
@@ -289,6 +297,18 @@ export default function Home() {
     setShowSettings(false);
   };
 
+  // データ更新のたびに entry_ok が true なら通知音を鳴らす
+  useEffect(() => {
+    const entryOk = data?.recommendation?.entry_ok ?? false;
+    if (soundEnabled && entryOk) {
+      try {
+        const audio = new Audio("/notify.mp3");
+        audio.play().catch(() => {/* autoplay ブロック時は無視 */});
+      } catch { /* Audio 非対応環境では無視 */ }
+    }
+    prevEntryOkRef.current = entryOk;
+  }, [data, soundEnabled]);
+
   const remaining = data ? Math.max(0, READY_THRESHOLD - data.total_rounds) : null;
   const rsiNeeded  = READY_THRESHOLD + params.rsi_period;
   const macdNeeded = READY_THRESHOLD + params.macd_slow + params.macd_signal - 2;
@@ -302,6 +322,22 @@ export default function Home() {
           <button onClick={() => { setShowSettings((s) => !s); setDraft(params); }}
             className="text-sm text-gray-400 hover:text-white transition-colors">
             {showSettings ? "▲ 設定を閉じる" : "⚙ 期間設定"}
+          </button>
+          <button
+            onClick={() => {
+              const next = !soundEnabled;
+              setSoundEnabled(next);
+              if (next) {
+                try {
+                  const audio = new Audio("/notify.mp3");
+                  audio.play().catch(() => {});
+                } catch { /* ignore */ }
+              }
+            }}
+            title={soundEnabled ? "サウンド ON（クリックでOFF）" : "サウンド OFF（クリックでON）"}
+            className={`text-lg transition-colors ${soundEnabled ? "text-green-400 hover:text-green-300" : "text-gray-500 hover:text-gray-300"}`}
+          >
+            {soundEnabled ? "🔔" : "🔕"}
           </button>
           <a href="/input" className="text-sm text-gray-400 hover:text-white transition-colors">入力画面 →</a>
         </div>
