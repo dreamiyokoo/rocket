@@ -61,11 +61,11 @@ def predict(multipliers: list[float]) -> MLPrediction:
     features = make_feature_vector(window)
 
     try:
-        # DataFrame with feature names to suppress sklearn warnings
-        import pandas as pd
-        X = pd.DataFrame([features], columns=FEATURE_COLS)
-        mc_proba = _multiclass_model.predict_proba(X)[0]
-        bi_proba = _binary_model.predict_proba(X)[0][1]
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            mc_proba = _multiclass_model.predict_proba([features])[0]
+            bi_proba = _binary_model.predict_proba([features])[0][1]
     except Exception as e:
         logger.warning("ML prediction failed: %s", e)
         return MLPrediction(available=False)
