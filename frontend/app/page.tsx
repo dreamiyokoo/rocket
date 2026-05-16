@@ -249,7 +249,7 @@ export default function Home() {
   const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<ChartTab>("prob");
-  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paramsRef = useRef<Params>(params);
   const prevEntryOkRef = useRef<boolean>(false);
@@ -310,11 +310,14 @@ export default function Home() {
   };
 
   // データ更新のたびに entry_ok が true なら通知音を鳴らす
+  // 最新倍率 ≤ 2.0x → blue.mp3 / 2.01x以上 → notify.mp3
   useEffect(() => {
     const entryOk = data?.recommendation?.entry_ok ?? false;
     if (soundEnabled && entryOk) {
       try {
-        const audio = new Audio("/notify.mp3");
+        const lastMultiplier = data?.chart_data?.at(-1)?.value ?? 999;
+        const soundFile = lastMultiplier <= 2.0 ? "/blue.mp3" : "/notify.mp3";
+        const audio = new Audio(soundFile);
         audio.play().catch(() => {/* autoplay ブロック時は無視 */});
       } catch { /* Audio 非対応環境では無視 */ }
     }
@@ -341,7 +344,9 @@ export default function Home() {
               setSoundEnabled(next);
               if (next) {
                 try {
-                  const audio = new Audio("/notify.mp3");
+                  const lastMultiplier = data?.chart_data?.at(-1)?.value ?? 999;
+                  const soundFile = lastMultiplier <= 2.0 ? "/blue.mp3" : "/notify.mp3";
+                  const audio = new Audio(soundFile);
                   audio.play().catch(() => {});
                 } catch { /* ignore */ }
               }
