@@ -31,6 +31,16 @@ type NoEntryData = {
   median_value: number;
 };
 
+type MLPrediction = {
+  available: boolean;
+  prob_low?: number;
+  prob_mid?: number;
+  prob_high?: number;
+  prob_low_binary?: number;
+  skip_recommended?: boolean;
+  entry_boost?: boolean;
+};
+
 type AnalysisData = {
   ready: boolean;
   total_rounds: number;
@@ -50,6 +60,7 @@ type AnalysisData = {
   chart_data?: { index: number; value: number }[];
   recommendation?: Recommendation;
   no_entry?: NoEntryData;
+  ml_prediction?: MLPrediction;
   analyzed_at?: string;
 };
 
@@ -506,21 +517,54 @@ export default function Home() {
             </div>
 
             <div className="grid grid-cols-3 gap-3">
-              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
-                <p className="text-xs font-semibold text-blue-400">下限ライン</p>
-                <p className="text-2xl font-bold text-blue-400">{fmt(rec.floor_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
-                <p className="text-xs text-gray-500">低倍率が続く局面で、これ以上になったら即キャッシュアウト</p>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
-                <p className="text-xs font-semibold text-gray-300">50% 期待値</p>
-                <p className="text-2xl font-bold text-white">{data.median != null ? fmt(data.median) : "—"}<span className="text-sm text-gray-400 ml-1">x</span></p>
-                <p className="text-xs text-gray-500">直近18件の中央値 — 2回に1回はこの倍率以上に到達</p>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-3 space-y-1">
-                <p className="text-xs font-semibold text-green-400">利確ライン</p>
-                <p className="text-2xl font-bold text-green-400">{fmt(rec.target_line)}<span className="text-sm text-gray-400 ml-1">x</span></p>
-                <p className="text-xs text-gray-500">波が来た局面で狙う利確目標。欲張らずここで逃す</p>
-              </div>
+              {/* ML 予測確率カード */}
+              {(() => {
+                const ml = data.ml_prediction;
+                const available = ml?.available && ml.prob_low != null;
+                const probLow  = available ? ml!.prob_low!  : null;
+                const probMid  = available ? ml!.prob_mid!  : null;
+                const probHigh = available ? ml!.prob_high! : null;
+                return (
+                  <>
+                    <div className={`rounded-lg p-3 space-y-2 ${available && ml!.skip_recommended ? "bg-red-950 border border-red-700" : "bg-gray-800"}`}>
+                      <p className="text-xs font-semibold text-red-400">Low 確率</p>
+                      <p className="text-2xl font-bold text-red-400">
+                        {available ? `${(probLow! * 100).toFixed(0)}%` : "—"}
+                      </p>
+                      {available && (
+                        <div className="w-full bg-gray-700 rounded-full h-1.5">
+                          <div className="bg-red-500 h-1.5 rounded-full" style={{ width: `${probLow! * 100}%` }} />
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-500">次が 1.5x 以下になる確率{available && ml!.skip_recommended ? "（スキップ推奨）" : ""}</p>
+                    </div>
+                    <div className="bg-gray-800 rounded-lg p-3 space-y-2">
+                      <p className="text-xs font-semibold text-gray-300">Mid 確率</p>
+                      <p className="text-2xl font-bold text-white">
+                        {available ? `${(probMid! * 100).toFixed(0)}%` : "—"}
+                      </p>
+                      {available && (
+                        <div className="w-full bg-gray-700 rounded-full h-1.5">
+                          <div className="bg-gray-400 h-1.5 rounded-full" style={{ width: `${probMid! * 100}%` }} />
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-500">次が 1.5x〜10x の確率</p>
+                    </div>
+                    <div className={`rounded-lg p-3 space-y-2 ${available && ml!.entry_boost ? "bg-green-950 border border-green-700" : "bg-gray-800"}`}>
+                      <p className="text-xs font-semibold text-green-400">High 確率</p>
+                      <p className="text-2xl font-bold text-green-400">
+                        {available ? `${(probHigh! * 100).toFixed(0)}%` : "—"}
+                      </p>
+                      {available && (
+                        <div className="w-full bg-gray-700 rounded-full h-1.5">
+                          <div className="bg-green-500 h-1.5 rounded-full" style={{ width: `${probHigh! * 100}%` }} />
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-500">次が 10x 以上になる確率{available && ml!.entry_boost ? "（エントリー強化）" : ""}</p>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </section>
         );
