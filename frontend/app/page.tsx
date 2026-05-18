@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const POLL_INTERVAL = 30_000;
+const POLL_INTERVAL = 10_000;
+const WS_RECONNECT_DELAY = 3_000; // WebSocket 切断後の再接続待機（ms）
 const READY_THRESHOLD = 18;
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -87,9 +88,9 @@ function calcEma(data: number[], period: number): number[] {
  */
 function probMacdSignal(
   history: number[],
-  fast = 5,
-  slow = 13,
-  sig = 5,
+  fast = 3,
+  slow = 8,
+  sig = 3,
 ): { state: "warn" | "buy" | "neutral"; histogram: number; macdLine: number; signalLine: number } {
   if (history.length < slow + sig) return { state: "neutral", histogram: 0, macdLine: 0, signalLine: 0 };
   const emaFast = calcEma(history, fast);
@@ -166,6 +167,75 @@ function ProbChart({ data }: { data: AnalysisData }) {
         {h20.length > 0 && labelOf(h20, "#fb923c")}
         {labelOf(h2, "#4ade80")} {labelOf(h5, "#facc15")} {labelOf(h10, "#f87171")}
       </>}
+      <line x1={ML} y1={MT + PH} x2={ML + PW} y2={MT + PH} stroke="#4b5563" />
+      <text x={ML} y={VH} fill="#6b7280" fontSize="10">1</text>
+      <text x={ML + PW} y={VH} textAnchor="end" fill="#6b7280" fontSize="10">{n}</text>
+    </svg>
+  );
+}
+
+function ProbMacdChart({ data }: { data: AnalysisData }) {
+  const fast = 3, slow = 8, sig = 3;
+
+  function buildMacdSeries(history: number[]) {
+    if (history.length < slow + sig) return { macdLine: [], signalLine: [], histogram: [] };
+    const emaF = calcEma(history, fast);
+    const emaS = calcEma(history, slow);
+    const macdLine = emaF.map((f, i) => f - emaS[i]);
+    const macdSlice = macdLine.slice(slow - 1);
+    const signalLine = calcEma(macdSlice, sig);
+    const offset = slow - 1 + sig - 1;
+    const histogram = macdSlice.slice(sig - 1).map((m, i) => m - signalLine[i]);
+    return { macdLine: macdLine.slice(offset), signalLine: signalLine.slice(sig - 1), histogram, offset };
+  }
+
+  const h20 = data.prob_2_0x?.history ?? [];
+  const h12 = data.prob_1_2x?.history ?? [];
+  const m20 = buildMacdSeries(h20);
+  const m12 = buildMacdSeries(h12);
+
+  const allVals = [...m20.histogram, ...m20.macdLine, ...m20.signalLine,
+                   ...m12.histogram, ...m12.macdLine, ...m12.signalLine].filter(isFinite);
+  if (allVals.length === 0) return <p className="text-sm text-gray-500 py-8 text-center">データ不足</p>;
+
+  const sorted = [...allVals].sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)];
+  const mads = sorted.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
+  const mad = mads[Math.floor(mads.length / 2)];
+  const spread = Math.max(mad * 6, 0.005);
+  const lo = med - spread, hi = med + spread;
+  const yM = (v: number) => yLinear(Math.max(lo, Math.min(hi, v)), lo, hi);
+  const zero = yM(0);
+  const n = m20.histogram.length;
+  const barW = Math.max(1, (PW / Math.max(n, 1)) * 0.5);
+
+  function histBars(histogram: number[], color1: string, color2: string) {
+    return histogram.map((h, i) => {
+      const x = xOf(i, n);
+      const y0 = zero, yh = yM(h);
+      const top = Math.min(y0, yh), ht = Math.abs(y0 - yh);
+      return <rect key={i} x={x - barW / 2} y={top} width={barW} height={Math.max(1, ht)}
+        fill={h >= 0 ? color1 : color2} opacity="0.5" />;
+    });
+  }
+  function linePath(arr: number[], color: string, dash?: string) {
+    return <path d={toPath(arr.map((v, i) => [xOf(i, n), yM(v)] as const))}
+      fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round"
+      strokeDasharray={dash} />;
+  }
+
+  return (
+    <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-auto">
+      <line x1={ML} y1={zero} x2={ML + PW} y2={zero} stroke="#4b5563" strokeDasharray="4 2" />
+      <text x={ML - 4} y={zero + 4} textAnchor="end" fill="#9ca3af" fontSize="10">0</text>
+      {/* 2.0x以下 */}
+      {histBars(m20.histogram, "#fb923c", "#1d4ed8")}
+      {linePath(m20.macdLine, "#fb923c")}
+      {linePath(m20.signalLine, "#f97316", "4 2")}
+      {/* 1.2x以下 */}
+      {histBars(m12.histogram, "#94a3b880", "#1e3a5f80")}
+      {linePath(m12.macdLine, "#94a3b8")}
+      {linePath(m12.signalLine, "#64748b", "4 2")}
       <line x1={ML} y1={MT + PH} x2={ML + PW} y2={MT + PH} stroke="#4b5563" />
       <text x={ML} y={VH} fill="#6b7280" fontSize="10">1</text>
       <text x={ML + PW} y={VH} textAnchor="end" fill="#6b7280" fontSize="10">{n}</text>
@@ -283,7 +353,7 @@ function multiplierBadgeClass(v: number): string {
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  type ChartTab = "prob" | "multiplier" | "rsi" | "macd";
+  type ChartTab = "prob" | "multiplier" | "rsi" | "macd" | "prob_macd";
   const [data, setData]         = useState<AnalysisData | null>(null);
   const [error, setError]       = useState(false);
   const [rounds, setRounds]     = useState<Round[]>([]);
@@ -333,15 +403,31 @@ export default function Home() {
   }, [params, fetchData, fetchRounds]);
 
   useEffect(() => {
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`);
-    ws.onmessage = () => { fetchData(paramsRef.current); fetchRounds(); };
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let destroyed = false;
+
+    const connect = () => {
+      if (destroyed) return;
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`);
+      ws.onmessage = () => { fetchData(paramsRef.current); fetchRounds(); };
+      ws.onclose = () => {
+        if (!destroyed) {
+          reconnectTimer = setTimeout(connect, WS_RECONNECT_DELAY);
+        }
+      };
+      ws.onerror = () => { ws?.close(); };
+    };
+    connect();
 
     const ch = new BroadcastChannel("rocket:data-changed");
     ch.onmessage = () => { fetchData(paramsRef.current); fetchRounds(); };
 
     return () => {
-      ws.close();
+      destroyed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
       ch.close();
     };
   }, [fetchData, fetchRounds]);
@@ -653,30 +739,103 @@ export default function Home() {
               {(() => {
                 const ml = data.ml_prediction;
                 const hasMl = Boolean(ml?.available && ml?.prob_blue_binary != null);
-                const p20 = hasMl ? ml!.prob_blue_binary! : (data.prob_2_0x?.current ?? 0);
                 const p20hist = data.prob_2_0x?.current ?? 0;
 
-                // 確率遷移MACDによる判定（メイン）
+                // 直前倍率によるRed後補正
+                const lastMult = data.chart_data?.at(-1)?.value ?? 0;
+                const afterExplosion = lastMult > 100;  // 爆発(>100x)直後 → Blue率0.433 ↓
+                const afterRed       = lastMult > 10 && !afterExplosion; // Red直後 → Blue率0.582 ↑
+
+                // 確率遷移MACDによる判定
                 const probHistory = data.prob_2_0x?.history ?? [];
-                const probMacd = probMacdSignal(probHistory);
-                const macdReady = probHistory.length >= 18; // slow+sig=18
+                const probMacd = probMacdSignal(probHistory);  // fast=3,slow=8,sig=3
+                const macdReady = probHistory.length >= 11; // slow+sig-1=10
 
-                // warn: MACD warn（Blue率上昇中） OR 窓内60%超 → どちらか一方でも非推奨
-                const warn20 = macdReady
-                  ? probMacd.state === "warn" || p20hist >= 0.60
-                  : p20hist >= 0.60 || (hasMl && Boolean(ml?.skip_recommended));
+                // 連続Blue数（ファストトリガー）
+                const blueStreak = data.no_entry?.low_consecutive_count ?? 0;
+                const streakWarn = blueStreak >= 5; // 4回を超えたら（5回目以降）警告
 
-                const signalLabel = macdReady
-                  ? probMacd.state === "warn"
-                    ? "確率MACD ゴールデンクロス"
-                    : probMacd.state === "buy"
-                    ? "確率MACD デッドクロス"
-                    : "確率MACD ニュートラル"
-                  : hasMl ? "しきい値判定（ML）" : "しきい値判定（履歴）";
+                // RSI 判定（移動平均ベース RSI < 30 → 売られすぎ → 危険）
+                const currentRsi = data.rsi?.current ?? null;
+                const rsiWarn = currentRsi !== null && currentRsi < 30;
+
+                // warn判定: 爆発直後は逆に安全(Blue率↓) / Red直後は危険(Blue率↑) / RSI<30 / 連続Blue / MACD / 窓内60%
+                const warn20 = afterExplosion
+                  ? false // 爆発(>100x)直後 Blue率↓43% → 安全 → 強制「買い」
+                  : afterRed
+                    ? true  // Red(10-100x)直後 Blue率↑58% → 危険 → 非推奨
+                    : rsiWarn
+                      ? true  // RSI<30 → 売られすぎ → 危険
+                      : streakWarn
+                        ? true
+                        : macdReady
+                          ? probMacd.state === "warn" || p20hist >= 0.60
+                          : p20hist >= 0.60 || (hasMl && Boolean(ml?.skip_recommended));
+
+                // 理由テキスト
+                const reasons: string[] = [];
+                if (afterExplosion) {
+                  reasons.push(`爆発直後(${lastMult.toFixed(2)}x) Blue率↓43% → 安全`);
+                } else if (afterRed) {
+                  reasons.push(`Red直後(${lastMult.toFixed(2)}x) Blue率↑58% → 危険`);
+                }
+                if (rsiWarn) {
+                  reasons.push(`RSI ${currentRsi!.toFixed(1)} → 売られすぎ 危険`);
+                }
+                if (streakWarn) {
+                  reasons.push(`連続Blue ${blueStreak}回 → 転換警戒`);
+                }
+                if (macdReady) {
+                  if (probMacd.state === "warn") reasons.push("確率MACD ゴールデンクロス");
+                  else if (probMacd.state === "buy") reasons.push("確率MACD デッドクロス");
+                  else reasons.push("確率MACD ニュートラル");
+                } else {
+                  reasons.push(hasMl ? "しきい値判定（ML）" : "しきい値判定（履歴）");
+                }
+                if (p20hist >= 0.60) reasons.push(`窓内Blue率 ${(p20hist * 100).toFixed(0)}%`);
+
                 const leftCard = warn20
                   ? "bg-red-950 border border-red-800"
                   : "bg-green-950 border border-green-800";
                 const leftTone = warn20 ? "text-red-300" : "text-green-300";
+
+                // ── 1.20以下 判定 ──────────────────────────────────
+                const p12hist = data.prob_1_2x?.current ?? 0;
+                const probHistory12 = data.prob_1_2x?.history ?? [];
+                const probMacd12 = probMacdSignal(probHistory12);
+                const macdReady12 = probHistory12.length >= 11;
+
+                // warn: Red直後は危険 / RSI<30 / 窓内25%超 OR MACD上昇 / 爆発直後は安全
+                const warn12 = afterExplosion
+                  ? false // 爆発直後は2.0x同様に安全 → 強制「安全圏」
+                  : afterRed
+                    ? true  // Red直後は危険
+                    : rsiWarn
+                      ? true  // RSI<30 → 危険
+                      : macdReady12
+                        ? probMacd12.state === "warn" || p12hist >= 0.25
+                        : p12hist >= 0.25;
+
+                const reasons12: string[] = [];
+                if (afterExplosion) {
+                  reasons12.push(`爆発直後(${lastMult.toFixed(2)}x) 安全`);
+                } else if (afterRed) {
+                  reasons12.push(`Red直後(${lastMult.toFixed(2)}x) 危険`);
+                }
+                if (rsiWarn) {
+                  reasons12.push(`RSI ${currentRsi!.toFixed(1)} → 売られすぎ 危険`);
+                }
+                if (macdReady12) {
+                  if (probMacd12.state === "warn") reasons12.push("確率MACD 上昇トレンド");
+                  else if (probMacd12.state === "buy") reasons12.push("確率MACD 下降トレンド");
+                  else reasons12.push("確率MACD ニュートラル");
+                }
+                if (p12hist >= 0.25) reasons12.push(`窓内即死率 ${(p12hist * 100).toFixed(0)}%`);
+
+                const rightCard = warn12
+                  ? "bg-orange-950 border border-orange-800"
+                  : "bg-green-950 border border-green-800";
+                const rightTone = warn12 ? "text-orange-300" : "text-green-300";
 
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -690,24 +849,31 @@ export default function Home() {
                           <p className={`text-base font-bold ${leftTone}`}>
                             {warn20 ? "非推奨" : "買い"}
                           </p>
-                          <p className="text-[11px] text-gray-500">
-                            {signalLabel}
-                          </p>
+                          <div className="mt-1 space-y-0.5">
+                            {reasons.map((r, i) => (
+                              <p key={i} className="text-[11px] text-gray-500">{r}</p>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="rounded-lg px-3 py-3 space-y-2 bg-gray-800 border border-dashed border-gray-600">
+                    <div className={`rounded-lg px-3 py-3 space-y-2 ${rightCard}`}>
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-gray-200">1.20以下 実装予定</p>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-gray-700 text-gray-300 border border-gray-500">第二段階</span>
+                        <p className="text-xs font-semibold text-gray-200">1.20以下 警告</p>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-orange-900 text-orange-200 border border-orange-700">第二段階</span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-bold text-gray-300">準備中</p>
-                          <p className="text-[11px] text-gray-500">トレンド併用ロジックを追加予定</p>
+                        <div className="min-w-0">
+                          <p className={`text-base font-bold ${rightTone}`}>
+                            {warn12 ? "即死注意" : "安全圏"}
+                          </p>
+                          <div className="mt-1 space-y-0.5">
+                            {reasons12.map((r, i) => (
+                              <p key={i} className="text-[11px] text-gray-500">{r}</p>
+                            ))}
+                          </div>
                         </div>
-                        <span className="text-xs text-gray-400">近日実装</span>
                       </div>
                     </div>
                   </div>
@@ -726,6 +892,7 @@ export default function Home() {
             {(
               [
                 { key: "prob",       label: "確率遷移" },
+                { key: "prob_macd",  label: "確率MACD" },
                 { key: "multiplier", label: "倍率履歴" },
                 { key: "rsi",        label: "RSI" },
                 { key: "macd",       label: "MACD" },
@@ -758,6 +925,18 @@ export default function Home() {
                 </div>
               </div>
               <ProbChart data={data} />
+            </div>
+          )}
+
+          {/* Prob MACD */}
+          {activeTab === "prob_macd" && (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-gray-400">
+                <span><span className="text-orange-400 font-bold">■</span> 2.0x以下 MACD</span>
+                <span><span className="text-slate-400 font-bold">■</span> 1.2x以下 MACD</span>
+                <span><span className="text-gray-500 font-bold">──</span> ゼロライン</span>
+              </div>
+              <ProbMacdChart data={data} />
             </div>
           )}
 
