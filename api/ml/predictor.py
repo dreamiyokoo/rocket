@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 _MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 
+# Stage 1: <=2.0x 回避警告の閾値（Recall>=0.90 を目安にした実測値）
+BLUE_WARN_THRESHOLD = 0.596
+
 _multiclass_model = None
 _binary_model = None
 _last_mtime: float = 0.0
@@ -95,6 +98,6 @@ def predict(multipliers: list[float]) -> MLPrediction:
         prob_yellow=prob_yellow,
         prob_red=prob_red,
         prob_blue_binary=prob_blue_binary,
-        skip_recommended=prob_blue_binary > 0.60,
+        skip_recommended=prob_blue_binary >= BLUE_WARN_THRESHOLD,
         entry_boost=prob_red > 0.30,
     )

@@ -618,60 +618,47 @@ export default function Home() {
                 );
               })()}
 
-              {/* 1.2x以下確率 */}
-              {data.prob_1_2x != null && (() => {
-                const p = data.prob_1_2x.current ?? 0;
-                const high = p >= 0.40;
-                const mid  = p >= 0.25;
+              {(() => {
+                const ml = data.ml_prediction;
+                const hasMl = Boolean(ml?.available && ml?.prob_blue_binary != null);
+                const p20 = hasMl ? ml!.prob_blue_binary! : (data.prob_2_0x?.current ?? 0);
+                const warn20 = hasMl ? Boolean(ml?.skip_recommended) : p20 >= 0.60;
+                const leftCard = warn20
+                  ? "bg-red-950 border border-red-800"
+                  : "bg-green-950 border border-green-800";
+                const leftTone = warn20 ? "text-red-300" : "text-green-300";
+
                 return (
-                  <div className={`flex items-center justify-between rounded-lg px-3 py-2 ${
-                    high ? "bg-red-950 border border-red-800" : mid ? "bg-yellow-950 border border-yellow-800" : "bg-gray-800 border border-gray-700"
-                  }`}>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-sm font-bold ${high ? "text-red-400" : mid ? "text-yellow-400" : "text-gray-400"}`}>
-                        {high ? "⚠" : mid ? "△" : "✓"}
-                      </span>
-                      <span className="text-xs text-gray-300">1.20x以下確率</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="w-24 bg-gray-700 rounded-full h-1.5">
-                        <div
-                          className={`h-1.5 rounded-full ${high ? "bg-red-500" : mid ? "bg-yellow-500" : "bg-slate-500"}`}
-                          style={{ width: `${Math.min(p * 100, 100)}%` }}
-                        />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className={`rounded-lg px-3 py-3 space-y-2 ${leftCard}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-gray-200">2.00以下 警告</p>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-blue-900 text-blue-200 border border-blue-700">第一段階</span>
                       </div>
-                      <span className={`text-sm font-bold font-mono ${high ? "text-red-300" : mid ? "text-yellow-300" : "text-gray-300"}`}>
-                        {pct(p)}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
-              {/* 2.0x以下確率 */}
-              {data.prob_2_0x != null && (() => {
-                const p = data.prob_2_0x.current ?? 0;
-                const high = p >= 0.60;
-                const mid  = p >= 0.45;
-                return (
-                  <div className={`flex items-center justify-between rounded-lg px-3 py-2 ${
-                    high ? "bg-red-950 border border-red-800" : mid ? "bg-yellow-950 border border-yellow-800" : "bg-gray-800 border border-gray-700"
-                  }`}>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-sm font-bold ${high ? "text-red-400" : mid ? "text-yellow-400" : "text-gray-400"}`}>
-                        {high ? "⚠" : mid ? "△" : "✓"}
-                      </span>
-                      <span className="text-xs text-gray-300">2.00x以下確率</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="w-24 bg-gray-700 rounded-full h-1.5">
-                        <div
-                          className={`h-1.5 rounded-full ${high ? "bg-red-500" : mid ? "bg-yellow-500" : "bg-slate-500"}`}
-                          style={{ width: `${Math.min(p * 100, 100)}%` }}
-                        />
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className={`text-base font-bold ${leftTone}`}>
+                            {warn20 ? "非推奨" : "買い"}
+                          </p>
+                          <p className="text-[11px] text-gray-500">
+                            {hasMl ? "しきい値判定（ML）" : "しきい値判定（履歴）"}
+                          </p>
+                        </div>
                       </div>
-                      <span className={`text-sm font-bold font-mono ${high ? "text-red-300" : mid ? "text-yellow-300" : "text-gray-300"}`}>
-                        {pct(p)}
-                      </span>
+                    </div>
+
+                    <div className="rounded-lg px-3 py-3 space-y-2 bg-gray-800 border border-dashed border-gray-600">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-gray-200">1.20以下 実装予定</p>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-gray-700 text-gray-300 border border-gray-500">第二段階</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-gray-300">準備中</p>
+                          <p className="text-[11px] text-gray-500">トレンド併用ロジックを追加予定</p>
+                        </div>
+                        <span className="text-xs text-gray-400">近日実装</span>
+                      </div>
                     </div>
                   </div>
                 );

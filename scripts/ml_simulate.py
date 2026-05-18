@@ -17,7 +17,7 @@ import pickle
 import numpy as np
 import pandas as pd
 
-WINDOW = 20
+WINDOW = 30
 FEATURE_COLS = [
     'mean', 'median', 'std', 'max', 'min', 'cv',
     'prob_2x', 'prob_5x', 'prob_10x', 'low_streak',

@@ -63,7 +63,7 @@ import numpy as np
 df = pd.read_csv('docs/rounds_export_ml.csv', parse_dates=['recorded_at'])
 df = df.sort_values('recorded_at').reset_index(drop=True)
 
-WINDOW = 20
+WINDOW = 30
 
 def make_features(df, window=WINDOW):
     rows = []

@@ -17,7 +17,7 @@ import lightgbm as lgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score
 
-WINDOW = 20
+WINDOW = 30
 FEATURE_COLS = [
     'mean', 'median', 'std', 'max', 'min', 'cv',
     'prob_2x', 'prob_5x', 'prob_10x', 'low_streak',
@@ -143,7 +143,7 @@ def main():
         csv_path = os.path.join(os.path.dirname(__file__), '..', csv_path)
 
     print(f'データ読み込み: {csv_path}')
-    df = pd.read_csv(csv_path, parse_dates=['recorded_at'])
+    df = pd.read_csv(csv_path, names=['id', 'multiplier', 'recorded_at'], parse_dates=['recorded_at'])
     df = df.sort_values('recorded_at').reset_index(drop=True)
     print(f'件数: {len(df)}  期間: {df["recorded_at"].min()} 〜 {df["recorded_at"].max()}')
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 
-WINDOW = 20
+WINDOW = 30
 
 FEATURE_COLS = [
     "mean",
