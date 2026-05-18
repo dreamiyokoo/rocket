@@ -70,7 +70,7 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:2026.5.0
-    command: tunnel --no-autoupdate run
+    command: tunnel --no-autoupdate --protocol http2 run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
