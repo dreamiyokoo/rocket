@@ -72,6 +72,38 @@ type Round = { id: number; multiplier: number; recorded_at: string };
 
 const DEFAULT_PARAMS: Params = { rsi_period: 14, macd_fast: 12, macd_slow: 26, macd_signal: 9 };
 
+// ── Prob MACD helper ─────────────────────────────────────────────────────────
+function calcEma(data: number[], period: number): number[] {
+  const k = 2 / (period + 1);
+  const ema: number[] = [data[0]];
+  for (let i = 1; i < data.length; i++) {
+    ema.push(data[i] * k + ema[i - 1] * (1 - k));
+  }
+  return ema;
+}
+
+/** prob_2_0x の履歴に MACD(fast,slow,sig) を適用し現在の状態を返す
+ *  戻り値: "warn" (histogram>0 = Blue率上昇中) | "buy" (histogram<=0 = Blue率下降中) | "neutral"
+ */
+function probMacdSignal(
+  history: number[],
+  fast = 5,
+  slow = 13,
+  sig = 5,
+): { state: "warn" | "buy" | "neutral"; histogram: number; macdLine: number; signalLine: number } {
+  if (history.length < slow + sig) return { state: "neutral", histogram: 0, macdLine: 0, signalLine: 0 };
+  const emaFast = calcEma(history, fast);
+  const emaSlow = calcEma(history, slow);
+  const macdLine = emaFast.map((f, i) => f - emaSlow[i]);
+  const macdSlice = macdLine.slice(slow - 1);
+  const signalLine = calcEma(macdSlice, sig);
+  const lastMacd = macdSlice[macdSlice.length - 1];
+  const lastSignal = signalLine[signalLine.length - 1];
+  const histogram = lastMacd - lastSignal;
+  const state = histogram > 0 ? "warn" : histogram < 0 ? "buy" : "neutral";
+  return { state, histogram, macdLine: lastMacd, signalLine: lastSignal };
+}
+
 // ── SVG helpers ─────────────────────────────────────────────────────────────
 
 const PW = 560; const PH = 180;
@@ -622,7 +654,25 @@ export default function Home() {
                 const ml = data.ml_prediction;
                 const hasMl = Boolean(ml?.available && ml?.prob_blue_binary != null);
                 const p20 = hasMl ? ml!.prob_blue_binary! : (data.prob_2_0x?.current ?? 0);
-                const warn20 = hasMl ? Boolean(ml?.skip_recommended) : p20 >= 0.60;
+                const p20hist = data.prob_2_0x?.current ?? 0;
+
+                // 確率遷移MACDによる判定（メイン）
+                const probHistory = data.prob_2_0x?.history ?? [];
+                const probMacd = probMacdSignal(probHistory);
+                const macdReady = probHistory.length >= 18; // slow+sig=18
+
+                // warn: MACD warn（Blue率上昇中） OR 窓内60%超 → どちらか一方でも非推奨
+                const warn20 = macdReady
+                  ? probMacd.state === "warn" || p20hist >= 0.60
+                  : p20hist >= 0.60 || (hasMl && Boolean(ml?.skip_recommended));
+
+                const signalLabel = macdReady
+                  ? probMacd.state === "warn"
+                    ? "確率MACD ゴールデンクロス"
+                    : probMacd.state === "buy"
+                    ? "確率MACD デッドクロス"
+                    : "確率MACD ニュートラル"
+                  : hasMl ? "しきい値判定（ML）" : "しきい値判定（履歴）";
                 const leftCard = warn20
                   ? "bg-red-950 border border-red-800"
                   : "bg-green-950 border border-green-800";
@@ -641,7 +691,7 @@ export default function Home() {
                             {warn20 ? "非推奨" : "買い"}
                           </p>
                           <p className="text-[11px] text-gray-500">
-                            {hasMl ? "しきい値判定（ML）" : "しきい値判定（履歴）"}
+                            {signalLabel}
                           </p>
                         </div>
                       </div>
