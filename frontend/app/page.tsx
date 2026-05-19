@@ -6,6 +6,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const POLL_INTERVAL = 10_000;
 const WS_RECONNECT_DELAY = 3_000; // WebSocket 切断後の再接続待機（ms）
 const READY_THRESHOLD = 18;
+const EVAL_ARCHIVE_KEY = "round_eval_archive_v3";
+const EVAL_ARCHIVE_UPDATED_AT_KEY = "round_eval_archive_updated_at";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -70,6 +72,18 @@ type AnalysisData = {
 
 type Params = { rsi_period: number; macd_fast: number; macd_slow: number; macd_signal: number };
 type Round = { id: number; multiplier: number; recorded_at: string };
+type PredictedBand = "blue" | "green" | "yellow" | "red";
+type RoundEval = {
+  predicted_band: PredictedBand;
+  actual_band: PredictedBand;
+  predicted_line?: number;
+  actual: number;
+  verdict: "hit" | "miss";
+  emoji: string;
+  label: string;
+  evaluated_at: string;
+};
+type RoundEvalArchive = Record<string, RoundEval>;
 
 const DEFAULT_PARAMS: Params = { rsi_period: 14, macd_fast: 12, macd_slow: 26, macd_signal: 9 };
 
@@ -350,6 +364,24 @@ function multiplierBadgeClass(v: number): string {
   return "bg-blue-600 text-white";
 }
 
+function predictedBandDotClass(band: PredictedBand): string {
+  if (band === "blue") return "bg-blue-200";
+  if (band === "green") return "bg-green-200";
+  if (band === "yellow") return "bg-yellow-200";
+  return "bg-red-200";
+}
+
+function loadEvalArchive(): RoundEvalArchive {
+  try {
+    const raw = localStorage.getItem(EVAL_ARCHIVE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as RoundEvalArchive;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
@@ -357,6 +389,7 @@ export default function Home() {
   const [data, setData]         = useState<AnalysisData | null>(null);
   const [error, setError]       = useState(false);
   const [rounds, setRounds]     = useState<Round[]>([]);
+  const [evalArchive, setEvalArchive] = useState<RoundEvalArchive>({});
   const [params, setParams]     = useState<Params>(DEFAULT_PARAMS);
   const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
@@ -367,6 +400,10 @@ export default function Home() {
   const prevEntryOkRef = useRef<boolean>(false);
 
   useEffect(() => { paramsRef.current = params; }, [params]);
+
+  useEffect(() => {
+    setEvalArchive(loadEvalArchive());
+  }, []);
 
   const fetchRounds = useCallback(async () => {
     try {
@@ -397,10 +434,27 @@ export default function Home() {
   useEffect(() => {
     fetchData(params);
     fetchRounds();
+    setEvalArchive(loadEvalArchive());
     if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => { fetchData(params); fetchRounds(); }, POLL_INTERVAL);
+    timerRef.current = setInterval(() => {
+      fetchData(params);
+      fetchRounds();
+      setEvalArchive(loadEvalArchive());
+    }, POLL_INTERVAL);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [params, fetchData, fetchRounds]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === EVAL_ARCHIVE_KEY || event.key === EVAL_ARCHIVE_UPDATED_AT_KEY) {
+        setEvalArchive(loadEvalArchive());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -411,7 +465,11 @@ export default function Home() {
       if (destroyed) return;
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`);
-      ws.onmessage = () => { fetchData(paramsRef.current); fetchRounds(); };
+      ws.onmessage = () => {
+        fetchData(paramsRef.current);
+        fetchRounds();
+        setEvalArchive(loadEvalArchive());
+      };
       ws.onclose = () => {
         if (!destroyed) {
           reconnectTimer = setTimeout(connect, WS_RECONNECT_DELAY);
@@ -422,7 +480,11 @@ export default function Home() {
     connect();
 
     const ch = new BroadcastChannel("rocket:data-changed");
-    ch.onmessage = () => { fetchData(paramsRef.current); fetchRounds(); };
+    ch.onmessage = () => {
+      fetchData(paramsRef.current);
+      fetchRounds();
+      setEvalArchive(loadEvalArchive());
+    };
 
     return () => {
       destroyed = true;
@@ -455,7 +517,6 @@ export default function Home() {
   const remaining = data ? Math.max(0, READY_THRESHOLD - data.total_rounds) : null;
   const rsiNeeded  = READY_THRESHOLD + params.rsi_period;
   const macdNeeded = READY_THRESHOLD + params.macd_slow + params.macd_signal - 2;
-
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-3xl mx-auto space-y-6">
       {/* Header */}
@@ -703,8 +764,23 @@ export default function Home() {
                   blue: probBlue, green: probGreen, yellow: probYellow, red: probRed,
                 };
 
+                const activeLevelDef = levelDefs.find(lv => lv.id === level);
+
                 return (
                   <>
+                    {/* 予測色表示 */}
+                    {available && activeLevelDef && (
+                      <div className={`rounded-lg p-4 text-center ${activeLevelDef.active}`}>
+                        <p className="text-xs text-gray-300 mb-2">予測色</p>
+                        <p className={`text-3xl font-bold ${activeLevelDef.text}`}>
+                          {activeLevelDef.label}
+                        </p>
+                        <p className={`text-2xl font-bold ${activeLevelDef.text} mt-1`}>
+                          {(probMap[level]! * 100).toFixed(0)}%
+                        </p>
+                      </div>
+                    )}
+
                     {/* 4色インジケーター */}
                     <div className="grid grid-cols-4 gap-2">
                       {levelDefs.map(lv => {
@@ -1015,14 +1091,26 @@ export default function Home() {
         <section className="bg-gray-900 rounded-xl p-4 space-y-3">
           <h2 className="text-sm font-semibold text-gray-300">入力履歴（新しい順）</h2>
           <div className="grid grid-cols-6 gap-2">
-            {rounds.map((r) => (
-              <span
-                key={r.id}
-                className={`px-2 py-0.5 rounded text-xs font-mono font-semibold text-center ${multiplierBadgeClass(r.multiplier)}`}
-              >
-                {r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}
-              </span>
-            ))}
+            {rounds.map((r) => {
+              const evalResult = evalArchive[String(r.id)];
+              const canShowEval = Boolean(data?.ml_prediction?.available);
+              return (
+                <span
+                  key={r.id}
+                  title={canShowEval && evalResult
+                    ? `${evalResult.label} / 実績:${r.multiplier.toFixed(2)}`
+                    : "予測比較なし"}
+                  className={`px-2 py-0.5 rounded text-xs font-mono font-semibold text-center flex items-center justify-center gap-1 ${multiplierBadgeClass(r.multiplier)}`}
+                >
+                  <span>{r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}</span>
+                  {canShowEval && evalResult && (
+                    evalResult.verdict === "miss"
+                      ? <span className={`inline-block w-2.5 h-2.5 rounded-full ${predictedBandDotClass(evalResult.predicted_band)}`} aria-hidden="true" />
+                      : <span>{evalResult.emoji}</span>
+                  )}
+                </span>
+              );
+            })}
           </div>
           <div className="flex gap-3 text-xs text-gray-600">
             <span><span className="inline-block w-2 h-2 rounded-sm bg-blue-600 mr-1"/>1x台</span>
@@ -1030,6 +1118,14 @@ export default function Home() {
             <span><span className="inline-block w-2 h-2 rounded-sm bg-yellow-500 mr-1"/>5x以上</span>
             <span><span className="inline-block w-2 h-2 rounded-sm bg-red-700 mr-1"/>10x以上</span>
           </div>
+          {data?.ml_prediction?.available ? (
+            <div className="flex gap-3 text-xs text-gray-500">
+              <span>✅ 的中（予測帯と実績帯が一致）</span>
+              <span>● ハズレ（予測帯の色を表示）</span>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500">予測未提供（ML準備中）のため判定マークは非表示</div>
+          )}
         </section>
       )}
     </main>

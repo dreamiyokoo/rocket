@@ -140,8 +140,8 @@ test("home page renders recommendation panel values", async ({ page }) => {
 
   await expect(page.getByText("推奨ライン")).toBeVisible();
   await expect(page.getByText("中ボラ")).toBeVisible();
-  await expect(page.getByText("🔵 Blue")).toBeVisible();
-  await expect(page.getByText("🟢 Green")).toBeVisible();
+  await expect(page.getByText("🔵 Blue").first()).toBeVisible();
+  await expect(page.getByText("🟢 Green").first()).toBeVisible();
 });
 
 test("no-entry indicator shows green when no reasons", async ({ page }) => {

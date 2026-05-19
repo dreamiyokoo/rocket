@@ -63,6 +63,8 @@ services:
     environment:
       HOSTNAME: "0.0.0.0"
       API_INTERNAL_URL: "http://api:8000"
+      FRONTEND_BASIC_AUTH_USER: ${FRONTEND_BASIC_AUTH_USER:-}
+      FRONTEND_BASIC_AUTH_PASS: ${FRONTEND_BASIC_AUTH_PASS:-}
     depends_on:
       - api
     ports:

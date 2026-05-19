@@ -21,6 +21,20 @@ README と `docs/issue/` 配下の仕様はすべてこの前提で統一する�
 - 閲覧画面はパブリックに公開する（認証不要）
 - 入力者アカウントは固定1名のみ（管理画面等での追加は不要）
 
+### トップページの任意 Basic 認証
+
+`/`（トップページ）にだけ Basic 認証を付けることができます。`/input` の JWT ログインとは独立しており、設定しない場合は従来どおり無効です。
+
+- `FRONTEND_BASIC_AUTH_USER`
+- `FRONTEND_BASIC_AUTH_PASS`
+
+`docker-compose.yml` の `frontend.environment` で上記2つを指定すると有効化されます。
+
+注意:
+- Basic 認証の対象はトップページ ` / ` のみです。
+- API エンドポイントや DB への直接操作には影響しません。
+- `scripts/load_csv_as_new_rounds.sh` など既存のデータ投入スクリプトには影響しません。
+
 ## 分析仕様
 
 ### 確率遷移（移動平均付き）
