@@ -398,6 +398,8 @@ export default function Home() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paramsRef = useRef<Params>(params);
   const prevEntryOkRef = useRef<boolean>(false);
+  // 予測保留: 最新ラウンドIDと予測バンドを保持し、次回更新時に照合
+  const pendingPredRef = useRef<{ roundId: number; band: PredictedBand; line?: number } | null>(null);
 
   useEffect(() => { paramsRef.current = params; }, [params]);
 
@@ -498,6 +500,73 @@ export default function Home() {
     setParams(draft);
     setShowSettings(false);
   };
+
+  // ── 予測 → 実績 照合ロジック ─────────────────────────────────────────────
+  // data/rounds が更新されるたびに実行:
+  //   1. pendingPred があれば rounds から該当ラウンドを探して照合し localStorage に保存
+  //   2. 現在の ML 予測バンドを次回照合用に pendingPred に保存
+  useEffect(() => {
+    const ml = data?.ml_prediction;
+    if (!ml?.available) return;
+
+    const latestRound = rounds[0]; // rounds は新しい順
+
+    // 1. 照合: 保留中の予測に対して新しいラウンドが届いたか確認
+    const pending = pendingPredRef.current;
+    if (pending && latestRound && latestRound.id !== pending.roundId) {
+      // pending.roundId の次のラウンドとして latestRound を照合
+      const actual = latestRound.multiplier;
+      const actualBand: PredictedBand =
+        actual >= 10 ? "red" : actual >= 5 ? "yellow" : actual >= 2 ? "green" : "blue";
+      const verdict: "hit" | "miss" = actualBand === pending.band ? "hit" : "miss";
+      const emoji = verdict === "hit" ? "✅" : "●";
+      const bandLabel: Record<PredictedBand, string> = {
+        blue: "1x台", green: "2x以上", yellow: "5x以上", red: "10x以上",
+      };
+      const entry: RoundEval = {
+        predicted_band: pending.band,
+        actual_band: actualBand,
+        predicted_line: pending.line,
+        actual,
+        verdict,
+        emoji,
+        label: `予測:${bandLabel[pending.band]} 実績:${bandLabel[actualBand]}`,
+        evaluated_at: new Date().toISOString(),
+      };
+      // latestRound.id に紐付けて保存
+      const archive = loadEvalArchive();
+      archive[String(latestRound.id)] = entry;
+      // 古いエントリを 500 件に制限
+      const keys = Object.keys(archive);
+      if (keys.length > 500) {
+        const sorted = keys.sort((a, b) => Number(a) - Number(b));
+        sorted.slice(0, keys.length - 500).forEach(k => delete archive[k]);
+      }
+      try {
+        localStorage.setItem(EVAL_ARCHIVE_KEY, JSON.stringify(archive));
+        localStorage.setItem(EVAL_ARCHIVE_UPDATED_AT_KEY, new Date().toISOString());
+      } catch { /* quota exceeded 等は無視 */ }
+      setEvalArchive({ ...archive });
+      pendingPredRef.current = null;
+    }
+
+    // 2. 今の予測バンドを保留に登録（次のラウンドで照合）
+    if (latestRound && (!pending || pending.roundId !== latestRound.id)) {
+      const probs = [
+        ml.prob_blue_binary ?? 0,
+        (ml.prob_green ?? 0),
+        (ml.prob_yellow ?? 0),
+        (ml.prob_red ?? 0),
+      ];
+      // 最も確率の高いバンドを予測とする
+      const bands: PredictedBand[] = ["blue", "green", "yellow", "red"];
+      const maxIdx = probs.indexOf(Math.max(...probs));
+      pendingPredRef.current = {
+        roundId: latestRound.id,
+        band: bands[maxIdx],
+      };
+    }
+  }, [data, rounds]);
 
   // データ更新のたびに entry_ok が true なら通知音を鳴らす
   // 最新倍率 ≤ 2.0x → blue.mp3 / 2.01x以上 → notify.mp3
