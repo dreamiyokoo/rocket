@@ -109,6 +109,11 @@ function judgePrediction(actual: number, predictedBand: PredictedBand): RoundEva
   };
 }
 
+function logPredictionEvent(event: string, payload: Record<string, unknown>): void {
+  const now = new Date().toISOString();
+  console.info(`[prediction-log] ${now} ${event}`, payload);
+}
+
 export default function InputPage() {
   const router = useRouter();
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -282,11 +287,32 @@ export default function InputPage() {
         setEvalArchive((prev) => {
           const next: RoundEvalArchive = { ...prev };
           for (const row of insertedRounds) {
-            next[String(row.id)] = judgePrediction(row.multiplier, predictedBand);
+            const evalResult = judgePrediction(row.multiplier, predictedBand);
+            next[String(row.id)] = evalResult;
+            logPredictionEvent("evaluated", {
+              round_id: row.id,
+              recorded_at: row.recorded_at,
+              predicted_band: evalResult.predicted_band,
+              actual_band: evalResult.actual_band,
+              actual: evalResult.actual,
+              verdict: evalResult.verdict,
+              evaluated_at: evalResult.evaluated_at,
+            });
           }
           const pruned = pruneEvalArchive(next);
           saveEvalArchive(pruned);
           return pruned;
+        });
+      } else if (predictedBand === null) {
+        logPredictionEvent("skipped", {
+          reason: "prediction_unavailable",
+          inserted_count: insertedRounds.length,
+        });
+      } else {
+        logPredictionEvent("skipped", {
+          reason: "batch_submission",
+          inserted_count: insertedRounds.length,
+          predicted_band: predictedBand,
         });
       }
 
