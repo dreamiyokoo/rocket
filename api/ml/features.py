@@ -5,7 +5,7 @@ import math
 
 WINDOW = 30
 
-FEATURE_COLS = [
+MULTICLASS_FEATURE_COLS = [
     "mean",
     "median",
     "std",
@@ -21,6 +21,22 @@ FEATURE_COLS = [
     "log_std",
     "momentum",
 ]
+
+BINARY_EXTRA_FEATURE_COLS = [
+    "prob_12",
+    "prob_15",
+    "prob_20",
+    "min5",
+    "mean5",
+    "mean10",
+    "std5",
+    "very_low_streak",
+]
+
+BINARY_FEATURE_COLS = MULTICLASS_FEATURE_COLS + BINARY_EXTRA_FEATURE_COLS
+
+# 後方互換: 既存参照は 4クラス特徴量として扱う
+FEATURE_COLS = MULTICLASS_FEATURE_COLS
 
 
 def _safe_log(x: float) -> float:
@@ -53,7 +69,7 @@ def make_feature_vector(window: list[float]) -> list[float]:
         window: 長さ WINDOW の直近倍率リスト（古い順）
 
     Returns:
-        FEATURE_COLS 順の特徴量リスト
+        MULTICLASS_FEATURE_COLS 順の特徴量リスト
     """
     n = len(window)
     mean = sum(window) / n
@@ -84,4 +100,36 @@ def make_feature_vector(window: list[float]) -> list[float]:
         mean, median, std, max(window), min(window), cv,
         prob_2x, prob_5x, prob_10x, low_streak,
         slope, log_mean, log_std, momentum,
+    ]
+
+
+def make_binary_feature_vector(window: list[float]) -> list[float]:
+    """直近 WINDOW 件から 2値分類用拡張特徴量ベクトルを生成する。"""
+    base = make_feature_vector(window)
+    n = len(window)
+    prob_12 = sum(1 for x in window if x <= 1.2) / n
+    prob_15 = sum(1 for x in window if x <= 1.5) / n
+    prob_20 = sum(1 for x in window if x <= 2.0) / n
+    min5 = min(window[-5:])
+    mean5 = sum(window[-5:]) / 5
+    mean10 = sum(window[-10:]) / 10
+    m5 = mean5
+    std5 = math.sqrt(sum((x - m5) ** 2 for x in window[-5:]) / 5)
+
+    very_low_streak = 0
+    for x in reversed(window):
+        if x <= 1.2:
+            very_low_streak += 1
+        else:
+            break
+
+    return base + [
+        prob_12,
+        prob_15,
+        prob_20,
+        min5,
+        mean5,
+        mean10,
+        std5,
+        very_low_streak,
     ]

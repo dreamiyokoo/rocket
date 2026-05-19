@@ -45,11 +45,28 @@ async def post_rounds(
     redis: Redis = Depends(get_redis),
     _: dict = Depends(get_current_user),
 ):
-    await db.execute(
-        text("INSERT INTO rounds (multiplier) SELECT v FROM unnest(CAST(:vals AS numeric[])) AS v"),
+    inserted_rows_result = await db.execute(
+        text(
+            "INSERT INTO rounds (multiplier) "
+            "SELECT v FROM unnest(CAST(:vals AS numeric[])) AS v "
+            "RETURNING id, multiplier, recorded_at"
+        ),
         {"vals": body.values},
     )
     await db.commit()
+
+    inserted_rounds = []
+    try:
+        for r in inserted_rows_result:
+            inserted_rounds.append(
+                {
+                    "id": r.id,
+                    "multiplier": float(r.multiplier),
+                    "recorded_at": r.recorded_at.isoformat(),
+                }
+            )
+    except TypeError:
+        inserted_rounds = []
 
     total_row = await db.execute(text("SELECT COUNT(*) FROM rounds"))
     total = total_row.scalar()
@@ -62,7 +79,12 @@ async def post_rounds(
     except RedisError:
         pass
 
-    return {"inserted": len(body.values), "total": total, "ready": total >= READY_THRESHOLD}
+    return {
+        "inserted": len(body.values),
+        "total": total,
+        "ready": total >= READY_THRESHOLD,
+        "inserted_rounds": inserted_rounds,
+    }
 
 
 @router.get("")

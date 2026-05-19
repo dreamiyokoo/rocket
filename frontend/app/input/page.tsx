@@ -6,6 +6,9 @@ import { clearAccessToken, getValidAccessToken } from "../lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const READY_THRESHOLD = 18;
+const EVAL_ARCHIVE_KEY = "round_eval_archive_v3";
+const EVAL_ARCHIVE_UPDATED_AT_KEY = "round_eval_archive_updated_at";
+const EVAL_ARCHIVE_MAX = 2000;
 
 function multiplierBadgeClass(v: number): string {
   if (v >= 10) return "bg-red-700 text-white";
@@ -14,8 +17,97 @@ function multiplierBadgeClass(v: number): string {
   return "bg-blue-600 text-white";
 }
 
+function predictedBandDotClass(band: PredictedBand): string {
+  if (band === "blue") return "bg-blue-200";
+  if (band === "green") return "bg-green-200";
+  if (band === "yellow") return "bg-yellow-200";
+  return "bg-red-200";
+}
+
 type Round = { id: number; multiplier: number; recorded_at: string };
-type AnalysisStatus = { total_rounds: number; ready: boolean } | null;
+type AnalysisStatus = { total_rounds: number; ready: boolean; mlAvailable: boolean } | null;
+type PredictedBand = "blue" | "green" | "yellow" | "red";
+type RoundEval = {
+  predicted_band: PredictedBand;
+  actual_band: PredictedBand;
+  actual: number;
+  verdict: "hit" | "miss";
+  emoji: string;
+  label: string;
+  evaluated_at: string;
+};
+type RoundEvalArchive = Record<string, RoundEval>;
+
+function loadEvalArchive(): RoundEvalArchive {
+  try {
+    const raw = localStorage.getItem(EVAL_ARCHIVE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as RoundEvalArchive;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveEvalArchive(archive: RoundEvalArchive): void {
+  try {
+    localStorage.setItem(EVAL_ARCHIVE_KEY, JSON.stringify(archive));
+    localStorage.setItem(EVAL_ARCHIVE_UPDATED_AT_KEY, String(Date.now()));
+  } catch {
+    // best-effort
+  }
+}
+
+function pruneEvalArchive(archive: RoundEvalArchive): RoundEvalArchive {
+  const ids = Object.keys(archive)
+    .map((k) => Number(k))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => b - a);
+  const keep = new Set(ids.slice(0, EVAL_ARCHIVE_MAX).map((n) => String(n)));
+  const next: RoundEvalArchive = {};
+  for (const [k, v] of Object.entries(archive)) {
+    if (keep.has(k)) next[k] = v;
+  }
+  return next;
+}
+
+function bandFromMultiplier(v: number): PredictedBand {
+  if (v <= 2.0) return "blue";
+  if (v <= 5.0) return "green";
+  if (v <= 10.0) return "yellow";
+  return "red";
+}
+
+function bandLabel(band: PredictedBand): string {
+  if (band === "blue") return "Blue";
+  if (band === "green") return "Green";
+  if (band === "yellow") return "Yellow";
+  return "Red";
+}
+
+function judgePrediction(actual: number, predictedBand: PredictedBand): RoundEval {
+  const actualBand = bandFromMultiplier(actual);
+  if (actualBand === predictedBand) {
+    return {
+      predicted_band: predictedBand,
+      actual_band: actualBand,
+      actual,
+      verdict: "hit",
+      emoji: "✅",
+      label: `的中（予測:${bandLabel(predictedBand)} / 実績:${bandLabel(actualBand)}）`,
+      evaluated_at: new Date().toISOString(),
+    };
+  }
+  return {
+    predicted_band: predictedBand,
+    actual_band: actualBand,
+    actual,
+    verdict: "miss",
+    emoji: "❌",
+    label: `ハズレ（予測:${bandLabel(predictedBand)} / 実績:${bandLabel(actualBand)}）`,
+    evaluated_at: new Date().toISOString(),
+  };
+}
 
 export default function InputPage() {
   const router = useRouter();
@@ -25,13 +117,19 @@ export default function InputPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [status, setStatus] = useState<AnalysisStatus>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
+  const [evalArchive, setEvalArchive] = useState<RoundEvalArchive>({});
   const broadcastRef = useRef<BroadcastChannel | null>(null);
 
   useEffect(() => {
     broadcastRef.current = new BroadcastChannel("rocket:data-changed");
     return () => { broadcastRef.current?.close(); };
+  }, []);
+
+  useEffect(() => {
+    setEvalArchive(loadEvalArchive());
   }, []);
 
   const showToast = (message: string, type: "success" | "error") => {
@@ -48,8 +146,16 @@ export default function InputPage() {
     try {
       const res = await fetch(`${API_URL}/api/v1/analysis`);
       if (!res.ok) return;
-      const data = await res.json() as { total_rounds: number; ready: boolean };
-      setStatus({ total_rounds: data.total_rounds, ready: data.ready });
+      const data = await res.json() as {
+        total_rounds: number;
+        ready: boolean;
+        ml_prediction?: { available?: boolean };
+      };
+      setStatus({
+        total_rounds: data.total_rounds,
+        ready: data.ready,
+        mlAvailable: Boolean(data.ml_prediction?.available),
+      });
     } catch {
       // best-effort
     }
@@ -65,6 +171,83 @@ export default function InputPage() {
       // best-effort
     }
   }, []);
+
+  const fetchCurrentPredictionBand = useCallback(async (): Promise<PredictedBand | null> => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/analysis`);
+      if (!res.ok) return null;
+      const data = await res.json() as {
+        recommendation?: { target_line?: number | null };
+        ml_prediction?: {
+          available?: boolean;
+          prob_blue?: number;
+          prob_green?: number;
+          prob_yellow?: number;
+          prob_red?: number;
+        };
+      };
+
+      const ml = data.ml_prediction;
+      const hasMl = Boolean(
+        ml?.available
+          && typeof ml.prob_blue === "number"
+          && typeof ml.prob_green === "number"
+          && typeof ml.prob_yellow === "number"
+          && typeof ml.prob_red === "number"
+      );
+
+      if (hasMl) {
+        const probs: Array<{ band: PredictedBand; p: number }> = [
+          { band: "blue", p: ml!.prob_blue! },
+          { band: "green", p: ml!.prob_green! },
+          { band: "yellow", p: ml!.prob_yellow! },
+          { band: "red", p: ml!.prob_red! },
+        ];
+        probs.sort((a, b) => b.p - a.p);
+        return probs[0].band;
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const backfillVisibleHistory = async () => {
+    if (rounds.length === 0) return;
+    setBackfilling(true);
+    try {
+      const predictedBand = await fetchCurrentPredictionBand();
+      if (!predictedBand) {
+        showToast("予測クラス取得に失敗しました。", "error");
+        return;
+      }
+      setEvalArchive((prev) => {
+        const next: RoundEvalArchive = { ...prev };
+        let changed = 0;
+        for (const row of rounds) {
+          const key = String(row.id);
+          if (!next[key]) {
+            next[key] = judgePrediction(row.multiplier, predictedBand);
+            changed += 1;
+          }
+        }
+        const pruned = pruneEvalArchive(next);
+        saveEvalArchive(pruned);
+        if (changed > 0) {
+          showToast(`${changed}件にマークを付与しました。`, "success");
+        } else {
+          showToast("未マークの履歴はありません。", "success");
+        }
+        return pruned;
+      });
+    } catch {
+      showToast("履歴再判定に失敗しました。", "error");
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
 
   useEffect(() => {
     const token = getValidAccessToken();
@@ -105,6 +288,7 @@ export default function InputPage() {
 
     setSubmitting(true);
     try {
+      const predictedBand = await fetchCurrentPredictionBand();
       const res = await fetch(`${API_URL}/api/v1/rounds`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -118,6 +302,26 @@ export default function InputPage() {
         showToast("送信に失敗しました。", "error");
         return;
       }
+      const postData = await res.json() as {
+        inserted: number;
+        total: number;
+        ready: boolean;
+        inserted_rounds?: Round[];
+      };
+
+      const insertedRounds = postData.inserted_rounds ?? [];
+      if (predictedBand !== null && insertedRounds.length > 0) {
+        setEvalArchive((prev) => {
+          const next: RoundEvalArchive = { ...prev };
+          for (const row of insertedRounds) {
+            next[String(row.id)] = judgePrediction(row.multiplier, predictedBand);
+          }
+          const pruned = pruneEvalArchive(next);
+          saveEvalArchive(pruned);
+          return pruned;
+        });
+      }
+
       setText("");
       showToast(`${parsed.values.length}件を送信しました。`, "success");
       broadcastRef.current?.postMessage("update");
@@ -151,8 +355,15 @@ export default function InputPage() {
       }
       showToast("全データを削除しました。", "success");
       broadcastRef.current?.postMessage("update");
-      setStatus({ total_rounds: 0, ready: false });
+      setStatus({ total_rounds: 0, ready: false, mlAvailable: false });
       setRounds([]);
+      setEvalArchive({});
+      try {
+        localStorage.removeItem(EVAL_ARCHIVE_KEY);
+        localStorage.setItem(EVAL_ARCHIVE_UPDATED_AT_KEY, String(Date.now()));
+      } catch {
+        // best-effort
+      }
     } catch {
       showToast("リセットに失敗しました。", "error");
     } finally {
@@ -242,7 +453,7 @@ export default function InputPage() {
         <div className="flex gap-3">
           <button
             type="submit"
-            disabled={submitting || resetting}
+            disabled={submitting || resetting || backfilling}
             className="flex-1 py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
           >
             {submitting ? "送信中..." : "送信"}
@@ -251,12 +462,20 @@ export default function InputPage() {
           <button
             type="button"
             onClick={handleReset}
-            disabled={submitting || resetting}
+            disabled={submitting || resetting || backfilling}
             className="py-2 px-4 bg-red-700 hover:bg-red-600 disabled:bg-red-900 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
           >
             {resetting ? "削除中..." : "リセット"}
           </button>
         </div>
+        <button
+          type="button"
+          onClick={backfillVisibleHistory}
+          disabled={submitting || resetting || backfilling || rounds.length === 0}
+          className="w-full py-2 px-4 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          {backfilling ? "再判定中..." : "履歴にマークを付与（表示中72件）"}
+        </button>
       </form>
 
       {/* History */}
@@ -264,14 +483,26 @@ export default function InputPage() {
         <section className="space-y-2">
           <h2 className="text-sm text-gray-400">入力履歴（新しい順）</h2>
           <div className="grid grid-cols-6 gap-2">
-            {rounds.map((r) => (
-              <span
-                key={r.id}
-                className={`px-2 py-0.5 rounded text-xs font-mono font-semibold text-center ${multiplierBadgeClass(r.multiplier)}`}
-              >
-                {r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}
-              </span>
-            ))}
+            {rounds.map((r) => {
+              const canShowEval = Boolean(status?.mlAvailable);
+              const ev = evalArchive[String(r.id)];
+              return (
+                <span
+                  key={r.id}
+                  title={canShowEval && ev
+                    ? `${ev.label} / 実績:${r.multiplier.toFixed(2)}`
+                    : "予測比較なし"}
+                  className={`px-2 py-0.5 rounded text-xs font-mono font-semibold text-center flex items-center justify-center gap-1 ${multiplierBadgeClass(r.multiplier)}`}
+                >
+                  <span>{r.multiplier % 1 === 0 ? r.multiplier.toFixed(0) : r.multiplier}</span>
+                  {canShowEval && ev && (
+                    ev.verdict === "hit"
+                      ? <span>✅</span>
+                      : <span className={`inline-block w-2.5 h-2.5 rounded-full ${predictedBandDotClass(ev.predicted_band)}`} aria-hidden="true" />
+                  )}
+                </span>
+              );
+            })}
           </div>
           <div className="flex gap-3 text-xs text-gray-600 mt-1">
             <span><span className="inline-block w-2 h-2 rounded-sm bg-blue-600 mr-1"/>1x台</span>
@@ -279,6 +510,14 @@ export default function InputPage() {
             <span><span className="inline-block w-2 h-2 rounded-sm bg-yellow-500 mr-1"/>5x以上</span>
             <span><span className="inline-block w-2 h-2 rounded-sm bg-red-700 mr-1"/>10x以上</span>
           </div>
+          {status?.mlAvailable ? (
+            <div className="flex gap-3 text-xs text-gray-500 mt-1">
+              <span>✅ 的中（予測帯と実績帯が一致）</span>
+              <span>● ハズレ（予測帯の色を表示）</span>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500 mt-1">予測未提供（ML準備中）のため判定マークは非表示</div>
+          )}
         </section>
       )}
 
