@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getValidAccessToken } from "./lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const POLL_INTERVAL = 10_000;
@@ -523,6 +524,7 @@ export default function Home() {
       const bandLabel: Record<PredictedBand, string> = {
         blue: "1x台", green: "2x以上", yellow: "5x以上", red: "10x以上",
       };
+      const evaluatedAt = new Date().toISOString();
       const entry: RoundEval = {
         predicted_band: pending.band,
         actual_band: actualBand,
@@ -531,12 +533,11 @@ export default function Home() {
         verdict,
         emoji,
         label: `予測:${bandLabel[pending.band]} 実績:${bandLabel[actualBand]}`,
-        evaluated_at: new Date().toISOString(),
+        evaluated_at: evaluatedAt,
       };
-      // latestRound.id に紐付けて保存
+      // localStorage に保存
       const archive = loadEvalArchive();
       archive[String(latestRound.id)] = entry;
-      // 古いエントリを 500 件に制限
       const keys = Object.keys(archive);
       if (keys.length > 500) {
         const sorted = keys.sort((a, b) => Number(a) - Number(b));
@@ -544,9 +545,27 @@ export default function Home() {
       }
       try {
         localStorage.setItem(EVAL_ARCHIVE_KEY, JSON.stringify(archive));
-        localStorage.setItem(EVAL_ARCHIVE_UPDATED_AT_KEY, new Date().toISOString());
+        localStorage.setItem(EVAL_ARCHIVE_UPDATED_AT_KEY, evaluatedAt);
       } catch { /* quota exceeded 等は無視 */ }
       setEvalArchive({ ...archive });
+
+      // サーバーに保存（best-effort）
+      const token = getValidAccessToken();
+      if (token) {
+        fetch(`${API_URL}/api/v1/evals`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({
+            round_id: latestRound.id,
+            predicted_band: pending.band,
+            actual_band: actualBand,
+            actual_multiplier: actual,
+            verdict,
+            evaluated_at: evaluatedAt,
+          }),
+        }).catch(() => { /* ネットワークエラーは無視 */ });
+      }
+
       pendingPredRef.current = null;
     }
 
