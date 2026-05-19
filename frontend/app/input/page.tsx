@@ -274,6 +274,9 @@ export default function InputPage() {
         inserted_rounds?: Round[];
       };
 
+      // Only archive eval for single-value submissions: with multiple values the
+      // same predicted band would be applied to all rounds, which is misleading
+      // because the model state changes after each round.
       const insertedRounds = postData.inserted_rounds ?? [];
       if (predictedBand !== null && insertedRounds.length === 1) {
         setEvalArchive((prev) => {
