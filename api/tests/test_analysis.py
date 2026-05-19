@@ -29,7 +29,9 @@ def _make_rows(values: list[float]) -> MagicMock:
 
 def _make_db(values: list[float]) -> AsyncMock:
     mock = AsyncMock()
-    mock.execute = AsyncMock(return_value=_make_rows(values))
+    count_result = MagicMock()
+    count_result.scalar = MagicMock(return_value=len(values))
+    mock.execute = AsyncMock(side_effect=[count_result, _make_rows(values)])
     return mock
 
 
@@ -145,7 +147,7 @@ class TestGetAnalysis:
         assert response.status_code == 200
         assert response.json()["ready"] is True
         broken_redis.get.assert_awaited_once()
-        mock_db.execute.assert_awaited_once()
+        assert mock_db.execute.await_count == 2
 
 
 class TestGetAnalysisMLPrediction:
