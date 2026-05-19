@@ -65,7 +65,6 @@ def threshold_for_target_recall(y_true, proba, target_recall: float = 0.90):
         "precision": 0.0,
         "skip_rate": 0.0,
     }
-    found = False
     for t in np.linspace(0.0, 1.0, 1001):
         pred = (proba >= t).astype(int)
         tp = int(((pred == 1) & (y_true == 1)).sum())
@@ -82,11 +81,8 @@ def threshold_for_target_recall(y_true, proba, target_recall: float = 0.90):
                 "precision": float(precision),
                 "skip_rate": float(skip_rate),
             }
-            found = True
         else:
             break
-    if not found:
-        return best
     return best
 
 

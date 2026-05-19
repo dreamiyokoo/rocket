@@ -56,17 +56,14 @@ async def post_rounds(
     await db.commit()
 
     inserted_rounds = []
-    try:
-        for r in inserted_rows_result:
-            inserted_rounds.append(
-                {
-                    "id": r.id,
-                    "multiplier": float(r.multiplier),
-                    "recorded_at": r.recorded_at.isoformat(),
-                }
-            )
-    except TypeError:
-        inserted_rounds = []
+    for r in inserted_rows_result:
+        inserted_rounds.append(
+            {
+                "id": r.id,
+                "multiplier": float(r.multiplier),
+                "recorded_at": r.recorded_at.isoformat(),
+            }
+        )
 
     total_row = await db.execute(text("SELECT COUNT(*) FROM rounds"))
     total = total_row.scalar()

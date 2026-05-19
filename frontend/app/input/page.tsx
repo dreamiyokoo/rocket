@@ -117,7 +117,6 @@ export default function InputPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [backfilling, setBackfilling] = useState(false);
   const [status, setStatus] = useState<AnalysisStatus>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [evalArchive, setEvalArchive] = useState<RoundEvalArchive>({});
@@ -213,40 +212,6 @@ export default function InputPage() {
     }
   }, []);
 
-  const backfillVisibleHistory = async () => {
-    if (rounds.length === 0) return;
-    setBackfilling(true);
-    try {
-      const predictedBand = await fetchCurrentPredictionBand();
-      if (!predictedBand) {
-        showToast("予測クラス取得に失敗しました。", "error");
-        return;
-      }
-      setEvalArchive((prev) => {
-        const next: RoundEvalArchive = { ...prev };
-        let changed = 0;
-        for (const row of rounds) {
-          const key = String(row.id);
-          if (!next[key]) {
-            next[key] = judgePrediction(row.multiplier, predictedBand);
-            changed += 1;
-          }
-        }
-        const pruned = pruneEvalArchive(next);
-        saveEvalArchive(pruned);
-        if (changed > 0) {
-          showToast(`${changed}件にマークを付与しました。`, "success");
-        } else {
-          showToast("未マークの履歴はありません。", "success");
-        }
-        return pruned;
-      });
-    } catch {
-      showToast("履歴再判定に失敗しました。", "error");
-    } finally {
-      setBackfilling(false);
-    }
-  };
 
 
   useEffect(() => {
@@ -310,7 +275,7 @@ export default function InputPage() {
       };
 
       const insertedRounds = postData.inserted_rounds ?? [];
-      if (predictedBand !== null && insertedRounds.length > 0) {
+      if (predictedBand !== null && insertedRounds.length === 1) {
         setEvalArchive((prev) => {
           const next: RoundEvalArchive = { ...prev };
           for (const row of insertedRounds) {
@@ -453,7 +418,7 @@ export default function InputPage() {
         <div className="flex gap-3">
           <button
             type="submit"
-            disabled={submitting || resetting || backfilling}
+            disabled={submitting || resetting}
             className="flex-1 py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
           >
             {submitting ? "送信中..." : "送信"}
@@ -462,20 +427,12 @@ export default function InputPage() {
           <button
             type="button"
             onClick={handleReset}
-            disabled={submitting || resetting || backfilling}
+            disabled={submitting || resetting}
             className="py-2 px-4 bg-red-700 hover:bg-red-600 disabled:bg-red-900 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
           >
             {resetting ? "削除中..." : "リセット"}
           </button>
         </div>
-        <button
-          type="button"
-          onClick={backfillVisibleHistory}
-          disabled={submitting || resetting || backfilling || rounds.length === 0}
-          className="w-full py-2 px-4 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors"
-        >
-          {backfilling ? "再判定中..." : "履歴にマークを付与（表示中72件）"}
-        </button>
       </form>
 
       {/* History */}
