@@ -30,6 +30,8 @@ class RoundsPostRequest(BaseModel):
             raise ValueError("values must not be empty")
         if len(v) > MAX_POST_VALUES:
             raise ValueError(f"values must contain at most {MAX_POST_VALUES} items")
+        # 小数2桁に丸める
+        v = [round(x, 2) for x in v]
         invalid = [x for x in v if not (MULTIPLIER_MIN <= x <= MULTIPLIER_MAX)]
         if invalid:
             raise ValueError(

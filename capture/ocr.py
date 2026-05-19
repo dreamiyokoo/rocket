@@ -103,7 +103,15 @@ def ocr_history_bar(img: np.ndarray, crop: list[int], scale: int, debug: bool = 
     # PSM 11: スパーステキスト（ピル間の空白に強い）
     text = pytesseract.image_to_string(white_mask, config="--oem 1 --psm 11 -c tessedit_char_whitelist=0123456789.")
     values = re.findall(r"\d+\.\d+", text)
-    return [float(v) for v in values]
+    # 小数点以下3桁以上は誤認識 → 小数2桁に丸める
+    result = []
+    for v in values:
+        f = float(v)
+        # 倍率の有効範囲チェック (1.01〜501.00)
+        f = round(f, 2)
+        if 1.01 <= f <= 501.00:
+            result.append(f)
+    return result
 
 
 # ────────────────────────────────────────────────
@@ -120,10 +128,10 @@ def login(client: httpx.Client, base_url: str, username: str, password: str) -> 
     return resp.json()["access_token"]
 
 
-def post_round(client: httpx.Client, base_url: str, token: str, value: float) -> dict:
+def post_rounds(client: httpx.Client, base_url: str, token: str, values: list[float]) -> dict:
     resp = client.post(
         f"{base_url}/api/v1/rounds",
-        json={"values": [value]},
+        json={"values": values},
         headers={"Authorization": f"Bearer {token}"},
         timeout=10,
     )
@@ -165,7 +173,7 @@ def run(cfg: dict, once: bool = False, debug: bool = False) -> None:
                     print(f"[ERROR] API に接続できませんでした: {e}", file=sys.stderr)
                     sys.exit(1)
 
-        last_latest: float | None = None
+        last_values: list[float] = []  # 前回スキャン時の全値（oldest-first順）
         token_refreshed_at = time.time()
 
         while True:
@@ -201,24 +209,40 @@ def run(cfg: dict, once: bool = False, debug: bool = False) -> None:
                 time.sleep(interval)
                 continue
 
-            # 最新値（バーの先頭 = 直近ラウンド）
-            latest = values[0]
+            # OCR結果はバーの左→右（新→旧）順なので反転してoldest-first順に
+            values_asc = list(reversed(values))
 
-            if latest != last_latest:
-                print(f"[INFO] 新しい爆発倍率検出: {latest}x")
+            # 前回と比較して新しくなった先頭部分を特定
+            new_values: list[float] = []
+            if not last_values:
+                # 初回は最新1件だけ投稿
+                new_values = [values_asc[-1]]
+            else:
+                # 前回の最新値が今回リストに存在するか探す
+                prev_latest = last_values[-1]
                 try:
-                    result = post_round(client, base_url, token, latest)
+                    idx = values_asc.index(prev_latest)
+                    # idx+1 以降が新しい値
+                    new_values = values_asc[idx + 1:]
+                except ValueError:
+                    # 前回値が見つからない場合（値が大きく変わった等）→ 最新1件を投稿
+                    new_values = [values_asc[-1]]
+
+            if new_values:
+                print(f"[INFO] 新しい爆発倍率検出: {new_values}")
+                try:
+                    result = post_rounds(client, base_url, token, new_values)
                     print(f"[INFO] POST 成功: inserted={result['inserted']}, total={result['total']}")
-                    last_latest = latest
+                    last_values = values_asc
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 401:
                         print("[WARN] トークン期限切れの可能性。再ログインして再送します", file=sys.stderr)
                         try:
                             token = login(client, base_url, username, password)
                             token_refreshed_at = time.time()
-                            result = post_round(client, base_url, token, latest)
+                            result = post_rounds(client, base_url, token, new_values)
                             print(f"[INFO] POST 成功: inserted={result['inserted']}, total={result['total']}")
-                            last_latest = latest
+                            last_values = values_asc
                         except (httpx.RequestError, httpx.HTTPStatusError) as relogin_error:
                             print(f"[ERROR] 再ログイン後の POST 失敗: {relogin_error}", file=sys.stderr)
                     else:
@@ -227,7 +251,7 @@ def run(cfg: dict, once: bool = False, debug: bool = False) -> None:
                     print(f"[ERROR] リクエストエラー: {e}", file=sys.stderr)
             else:
                 if debug:
-                    print(f"[DEBUG] 変化なし: {latest}x (OCR全件: {values})")
+                    print(f"[DEBUG] 変化なし (OCR全件: {values_asc})")
 
             if once:
                 break
