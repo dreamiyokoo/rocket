@@ -81,7 +81,12 @@ def make_feature_vector(window: list[float]) -> list[float]:
     prob_5x = sum(1 for x in window if x >= 5.0) / n
     prob_10x = sum(1 for x in window if x >= 10.0) / n
 
-    low_streak = sum(1 for x in window if x < 1.5)
+    low_streak = 0
+    for x in reversed(window):
+        if x < 1.5:
+            low_streak += 1
+        else:
+            break
 
     slope = _polyfit_slope(window)
 
@@ -111,7 +116,12 @@ def make_binary_feature_vector(window: list[float]) -> list[float]:
     m5 = mean5
     std5 = math.sqrt(sum((x - m5) ** 2 for x in window[-5:]) / 5)
 
-    very_low_streak = sum(1 for x in window if x <= 1.2)
+    very_low_streak = 0
+    for x in reversed(window):
+        if x <= 1.2:
+            very_low_streak += 1
+        else:
+            break
 
     return base + [
         prob_12,
