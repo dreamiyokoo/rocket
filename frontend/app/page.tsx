@@ -518,7 +518,7 @@ export default function Home() {
       // pending.roundId の次のラウンドとして latestRound を照合
       const actual = latestRound.multiplier;
       const actualBand: PredictedBand =
-        actual >= 10 ? "red" : actual >= 5 ? "yellow" : actual >= 2 ? "green" : "blue";
+        actual > 10.0 ? "red" : actual > 5.0 ? "yellow" : actual > 2.0 ? "green" : "blue";
       const verdict: "hit" | "miss" = actualBand === pending.band ? "hit" : "miss";
       const emoji = verdict === "hit" ? "✅" : "●";
       const bandLabel: Record<PredictedBand, string> = {
@@ -572,7 +572,7 @@ export default function Home() {
     // 2. 今の予測バンドを保留に登録（次のラウンドで照合）
     if (latestRound && (!pending || pending.roundId !== latestRound.id)) {
       const probs = [
-        ml.prob_blue_binary ?? 0,
+        ml.prob_blue ?? 0,
         (ml.prob_green ?? 0),
         (ml.prob_yellow ?? 0),
         (ml.prob_red ?? 0),
