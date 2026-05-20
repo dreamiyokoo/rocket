@@ -167,36 +167,68 @@ function TrendChart({
   );
 }
 
-function HourlyCountBarChart({
+function HourlyProbabilityBarChart({
   stats,
 }: {
-  stats: Array<{ hour: number; sample: number }>;
+  stats: Array<{
+    hour: number;
+    p12: number;
+    p20: number;
+    green: number;
+    yellow: number;
+    red: number;
+  }>;
 }) {
   if (stats.length === 0) {
     return <p className="text-sm text-gray-500">表示できるデータがありません。</p>;
   }
 
-  const maxSample = Math.max(...stats.map((s) => s.sample), 1);
+  const keys: Array<{
+    id: "p12" | "p20" | "green" | "yellow" | "red";
+    color: string;
+    label: string;
+  }> = [
+    { id: "p12", color: "bg-orange-400/85", label: "1.2以下" },
+    { id: "p20", color: "bg-cyan-400/85", label: "2.0以下" },
+    { id: "green", color: "bg-green-400/85", label: "Green" },
+    { id: "yellow", color: "bg-yellow-300/85", label: "Yellow" },
+    { id: "red", color: "bg-red-400/85", label: "Red" },
+  ];
 
   return (
     <div>
-      <div className="flex items-end gap-1 h-44 rounded-xl border border-gray-800 bg-gray-950/40 p-3 overflow-x-auto">
+      <div className="flex items-end gap-2 h-52 rounded-xl border border-gray-800 bg-gray-950/40 p-3 overflow-x-auto">
         {stats.map((s) => {
-          const h = Math.max(2, Math.round((s.sample / maxSample) * 140));
           return (
-            <div key={s.hour} className="flex flex-col items-center min-w-[24px] gap-1">
-              <div className="text-[9px] text-gray-400 leading-none">{s.sample.toLocaleString()}</div>
-              <div
-                className="w-4 rounded-t bg-cyan-400/80"
-                style={{ height: `${h}px` }}
-                title={`${String(s.hour).padStart(2, "0")}:00 ${s.sample.toLocaleString()}件`}
-              />
+            <div key={s.hour} className="flex flex-col items-center min-w-[46px] gap-1">
+              <div className="flex items-end gap-0.5 h-40">
+                {keys.map((k) => {
+                  const v = s[k.id];
+                  const h = Math.max(2, Math.round(v * 140));
+                  return (
+                    <div key={k.id} className="flex flex-col items-center gap-0.5">
+                      <div
+                        className={`w-1.5 rounded-t ${k.color}`}
+                        style={{ height: `${h}px` }}
+                        title={`${String(s.hour).padStart(2, "0")}:00 ${k.label} ${pct(v)}`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
               <div className="text-[10px] text-gray-500">{String(s.hour).padStart(2, "0")}</div>
             </div>
           );
         })}
       </div>
-      <p className="mt-2 text-xs text-gray-500">時間帯ごとの件数（全データ/JST）</p>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-400">
+        <span className="text-orange-300">1.2以下</span>
+        <span className="text-cyan-300">2.0以下</span>
+        <span className="text-green-300">Green</span>
+        <span className="text-yellow-300">Yellow</span>
+        <span className="text-red-300">Red</span>
+      </div>
+      <p className="mt-1 text-xs text-gray-500">時間帯ごとの確率比較（全データ/JST）</p>
     </div>
   );
 }
@@ -328,7 +360,16 @@ export default function ProbabilityTrendsPage() {
             </div>
 
             <div className="mt-4">
-              <HourlyCountBarChart stats={hourlyStats.map((row) => ({ hour: row.hour, sample: row.sample }))} />
+              <HourlyProbabilityBarChart
+                stats={hourlyStats.map((row) => ({
+                  hour: row.hour,
+                  p12: row.p12,
+                  p20: row.p20,
+                  green: row.green,
+                  yellow: row.yellow,
+                  red: row.red,
+                }))}
+              />
             </div>
 
             <div className="mt-4 overflow-x-auto">
