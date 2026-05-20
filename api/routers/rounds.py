@@ -117,6 +117,8 @@ async def get_probability_trends(
             SELECT
                 date_trunc('hour', recorded_at) AS bucket,
                 COUNT(*) AS total,
+                AVG(CASE WHEN multiplier <= 1.2 THEN 1.0 ELSE 0.0 END) AS prob_1_2x,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_2_0x,
                 AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_blue,
                 AVG(CASE WHEN multiplier > 2.0 AND multiplier <= 5.0 THEN 1.0 ELSE 0.0 END) AS prob_green,
                 AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
@@ -136,6 +138,8 @@ async def get_probability_trends(
             SELECT
                 date_trunc('day', recorded_at) AS bucket,
                 COUNT(*) AS total,
+                AVG(CASE WHEN multiplier <= 1.2 THEN 1.0 ELSE 0.0 END) AS prob_1_2x,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_2_0x,
                 AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_blue,
                 AVG(CASE WHEN multiplier > 2.0 AND multiplier <= 5.0 THEN 1.0 ELSE 0.0 END) AS prob_green,
                 AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
@@ -153,6 +157,8 @@ async def get_probability_trends(
         {
             "bucket": r.bucket.isoformat(),
             "total": int(r.total),
+            "prob_1_2x": float(r.prob_1_2x or 0.0),
+            "prob_2_0x": float(r.prob_2_0x or 0.0),
             "prob_blue": float(r.prob_blue or 0.0),
             "prob_green": float(r.prob_green or 0.0),
             "prob_yellow": float(r.prob_yellow or 0.0),
@@ -165,6 +171,8 @@ async def get_probability_trends(
         {
             "bucket": r.bucket.isoformat(),
             "total": int(r.total),
+            "prob_1_2x": float(r.prob_1_2x or 0.0),
+            "prob_2_0x": float(r.prob_2_0x or 0.0),
             "prob_blue": float(r.prob_blue or 0.0),
             "prob_green": float(r.prob_green or 0.0),
             "prob_yellow": float(r.prob_yellow or 0.0),

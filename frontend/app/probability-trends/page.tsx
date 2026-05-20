@@ -8,6 +8,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 type TrendPoint = {
   bucket: string;
   total: number;
+  prob_1_2x: number;
+  prob_2_0x: number;
   prob_blue: number;
   prob_green: number;
   prob_yellow: number;
@@ -76,6 +78,8 @@ function TrendChart({
   }
 
   const blue = points.map((p) => p.prob_blue);
+  const p12 = points.map((p) => p.prob_1_2x);
+  const p20 = points.map((p) => p.prob_2_0x);
   const green = points.map((p) => p.prob_green);
   const yellow = points.map((p) => p.prob_yellow);
   const red = points.map((p) => p.prob_red);
@@ -112,6 +116,8 @@ function TrendChart({
             </g>
           ))}
 
+          <path d={toPath(p12)} fill="none" stroke="#f97316" strokeWidth="3" />
+          <path d={toPath(p20)} fill="none" stroke="#38bdf8" strokeWidth="3" />
           <path d={toPath(blue)} fill="none" stroke="#60a5fa" strokeWidth="2.5" />
           <path d={toPath(green)} fill="none" stroke="#4ade80" strokeWidth="2.5" />
           <path d={toPath(yellow)} fill="none" stroke="#facc15" strokeWidth="2.5" />
@@ -144,6 +150,8 @@ function TrendChart({
       </div>
 
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs">
+        <span className="text-orange-300">1.2以下: {pct(p12[p12.length - 1])}</span>
+        <span className="text-cyan-300">2.0以下: {pct(p20[p20.length - 1])}</span>
         <span className="text-blue-300">Blue({"<="}2.0): {pct(blue[blue.length - 1])}</span>
         <span className="text-green-300">Green(2.01-5.0): {pct(green[green.length - 1])}</span>
         <span className="text-yellow-300">Yellow(5.01-10.0): {pct(yellow[yellow.length - 1])}</span>
@@ -193,6 +201,8 @@ export default function ProbabilityTrendsPage() {
     return {
       date: timeLabel(last.bucket, "daily"),
       total: last.total,
+      p12: pct(last.prob_1_2x),
+      p20: pct(last.prob_2_0x),
       blue: pct(last.prob_blue),
       green: pct(last.prob_green),
       yellow: pct(last.prob_yellow),
@@ -234,12 +244,14 @@ export default function ProbabilityTrendsPage() {
       {!loading && !error && data && (
         <>
           {summary && (
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-8 gap-3 text-sm">
               <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3 md:col-span-2">
                 <p className="text-gray-500">最新日</p>
                 <p className="text-white font-semibold">{summary.date}</p>
                 <p className="text-gray-400 text-xs mt-1">サンプル数: {summary.total}</p>
               </div>
+              <div className="rounded-xl border border-orange-900/50 bg-orange-950/30 p-3 text-orange-200">1.2以下 {summary.p12}</div>
+              <div className="rounded-xl border border-cyan-900/50 bg-cyan-950/30 p-3 text-cyan-200">2.0以下 {summary.p20}</div>
               <div className="rounded-xl border border-blue-900/50 bg-blue-950/40 p-3 text-blue-200">Blue {summary.blue}</div>
               <div className="rounded-xl border border-green-900/50 bg-green-950/40 p-3 text-green-200">Green {summary.green}</div>
               <div className="rounded-xl border border-yellow-900/50 bg-yellow-950/30 p-3 text-yellow-200">Yellow {summary.yellow}</div>
