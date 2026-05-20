@@ -77,7 +77,6 @@ function TrendChart({
     );
   }
 
-  const blue = points.map((p) => p.prob_blue);
   const p12 = points.map((p) => p.prob_1_2x);
   const p20 = points.map((p) => p.prob_2_0x);
   const green = points.map((p) => p.prob_green);
@@ -118,7 +117,6 @@ function TrendChart({
 
           <path d={toPath(p12)} fill="none" stroke="#f97316" strokeWidth="3" />
           <path d={toPath(p20)} fill="none" stroke="#38bdf8" strokeWidth="3" />
-          <path d={toPath(blue)} fill="none" stroke="#60a5fa" strokeWidth="2.5" />
           <path d={toPath(green)} fill="none" stroke="#4ade80" strokeWidth="2.5" />
           <path d={toPath(yellow)} fill="none" stroke="#facc15" strokeWidth="2.5" />
           <path d={toPath(red)} fill="none" stroke="#f87171" strokeWidth="2.5" />
@@ -152,7 +150,6 @@ function TrendChart({
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs">
         <span className="text-orange-300">1.2以下: {pct(p12[p12.length - 1])}</span>
         <span className="text-cyan-300">2.0以下: {pct(p20[p20.length - 1])}</span>
-        <span className="text-blue-300">Blue({"<="}2.0): {pct(blue[blue.length - 1])}</span>
         <span className="text-green-300">Green(2.01-5.0): {pct(green[green.length - 1])}</span>
         <span className="text-yellow-300">Yellow(5.01-10.0): {pct(yellow[yellow.length - 1])}</span>
         <span className="text-red-300">Red({">"}10.0): {pct(red[red.length - 1])}</span>
@@ -203,11 +200,69 @@ export default function ProbabilityTrendsPage() {
       total: last.total,
       p12: pct(last.prob_1_2x),
       p20: pct(last.prob_2_0x),
-      blue: pct(last.prob_blue),
       green: pct(last.prob_green),
       yellow: pct(last.prob_yellow),
       red: pct(last.prob_red),
     };
+  }, [data]);
+
+  const hourlyStats = useMemo(() => {
+    if (!data || data.hourly.length === 0) return [] as Array<{
+      hour: number;
+      sample: number;
+      p12: number;
+      p20: number;
+      green: number;
+      yellow: number;
+      red: number;
+    }>;
+
+    const buckets = new Map<number, {
+      sample: number;
+      p12Weighted: number;
+      p20Weighted: number;
+      greenWeighted: number;
+      yellowWeighted: number;
+      redWeighted: number;
+    }>();
+
+    for (let h = 0; h < 24; h++) {
+      buckets.set(h, {
+        sample: 0,
+        p12Weighted: 0,
+        p20Weighted: 0,
+        greenWeighted: 0,
+        yellowWeighted: 0,
+        redWeighted: 0,
+      });
+    }
+
+    for (const point of data.hourly) {
+      const d = new Date(point.bucket);
+      if (Number.isNaN(d.getTime())) continue;
+      const hour = d.getHours();
+      const item = buckets.get(hour);
+      if (!item) continue;
+      item.sample += point.total;
+      item.p12Weighted += point.prob_1_2x * point.total;
+      item.p20Weighted += point.prob_2_0x * point.total;
+      item.greenWeighted += point.prob_green * point.total;
+      item.yellowWeighted += point.prob_yellow * point.total;
+      item.redWeighted += point.prob_red * point.total;
+    }
+
+    return Array.from(buckets.entries()).map(([hour, item]) => {
+      const denom = item.sample || 1;
+      return {
+        hour,
+        sample: item.sample,
+        p12: item.p12Weighted / denom,
+        p20: item.p20Weighted / denom,
+        green: item.greenWeighted / denom,
+        yellow: item.yellowWeighted / denom,
+        red: item.redWeighted / denom,
+      };
+    });
   }, [data]);
 
   return (
@@ -252,7 +307,6 @@ export default function ProbabilityTrendsPage() {
               </div>
               <div className="rounded-xl border border-orange-900/50 bg-orange-950/30 p-3 text-orange-200">1.2以下 {summary.p12}</div>
               <div className="rounded-xl border border-cyan-900/50 bg-cyan-950/30 p-3 text-cyan-200">2.0以下 {summary.p20}</div>
-              <div className="rounded-xl border border-blue-900/50 bg-blue-950/40 p-3 text-blue-200">Blue {summary.blue}</div>
               <div className="rounded-xl border border-green-900/50 bg-green-950/40 p-3 text-green-200">Green {summary.green}</div>
               <div className="rounded-xl border border-yellow-900/50 bg-yellow-950/30 p-3 text-yellow-200">Yellow {summary.yellow}</div>
               <div className="rounded-xl border border-red-900/50 bg-red-950/30 p-3 text-red-200">Red {summary.red}</div>
@@ -260,6 +314,43 @@ export default function ProbabilityTrendsPage() {
           )}
 
           <TrendChart title="時間別 確率推移" points={data.hourly} mode="hourly" />
+
+          <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-white">時間帯別 確率統計</h2>
+              <span className="text-xs text-gray-400">0〜23時集計（加重平均）</span>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-xs md:text-sm">
+                <thead>
+                  <tr className="border-b border-gray-700 text-gray-300">
+                    <th className="px-2 py-2 text-left">時刻</th>
+                    <th className="px-2 py-2 text-right">件数</th>
+                    <th className="px-2 py-2 text-right text-orange-300">1.2以下</th>
+                    <th className="px-2 py-2 text-right text-cyan-300">2.0以下</th>
+                    <th className="px-2 py-2 text-right text-green-300">Green</th>
+                    <th className="px-2 py-2 text-right text-yellow-300">Yellow</th>
+                    <th className="px-2 py-2 text-right text-red-300">Red</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hourlyStats.map((row) => (
+                    <tr key={row.hour} className="border-b border-gray-800/80 text-gray-200">
+                      <td className="px-2 py-1.5">{String(row.hour).padStart(2, "0")}:00</td>
+                      <td className="px-2 py-1.5 text-right text-gray-300">{row.sample.toLocaleString()}</td>
+                      <td className="px-2 py-1.5 text-right text-orange-200">{pct(row.p12)}</td>
+                      <td className="px-2 py-1.5 text-right text-cyan-200">{pct(row.p20)}</td>
+                      <td className="px-2 py-1.5 text-right text-green-200">{pct(row.green)}</td>
+                      <td className="px-2 py-1.5 text-right text-yellow-200">{pct(row.yellow)}</td>
+                      <td className="px-2 py-1.5 text-right text-red-200">{pct(row.red)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <TrendChart title="日別 確率推移" points={data.daily} mode="daily" />
         </>
       )}
