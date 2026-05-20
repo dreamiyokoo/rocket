@@ -104,6 +104,83 @@ async def get_rounds(
     return {"rounds": rounds, "total": total}
 
 
+@router.get("/probability-trends")
+async def get_probability_trends(
+    days: int = Query(default=14, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    params = {"days": days}
+
+    hourly_rows = await db.execute(
+        text(
+            """
+            SELECT
+                date_trunc('hour', recorded_at) AS bucket,
+                COUNT(*) AS total,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_blue,
+                AVG(CASE WHEN multiplier > 2.0 AND multiplier <= 5.0 THEN 1.0 ELSE 0.0 END) AS prob_green,
+                AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
+                AVG(CASE WHEN multiplier > 10.0 THEN 1.0 ELSE 0.0 END) AS prob_red
+            FROM rounds
+            WHERE recorded_at >= NOW() - (:days || ' days')::interval
+            GROUP BY 1
+            ORDER BY 1 ASC
+            """
+        ),
+        params,
+    )
+
+    daily_rows = await db.execute(
+        text(
+            """
+            SELECT
+                date_trunc('day', recorded_at) AS bucket,
+                COUNT(*) AS total,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_blue,
+                AVG(CASE WHEN multiplier > 2.0 AND multiplier <= 5.0 THEN 1.0 ELSE 0.0 END) AS prob_green,
+                AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
+                AVG(CASE WHEN multiplier > 10.0 THEN 1.0 ELSE 0.0 END) AS prob_red
+            FROM rounds
+            WHERE recorded_at >= NOW() - (:days || ' days')::interval
+            GROUP BY 1
+            ORDER BY 1 ASC
+            """
+        ),
+        params,
+    )
+
+    hourly = [
+        {
+            "bucket": r.bucket.isoformat(),
+            "total": int(r.total),
+            "prob_blue": float(r.prob_blue or 0.0),
+            "prob_green": float(r.prob_green or 0.0),
+            "prob_yellow": float(r.prob_yellow or 0.0),
+            "prob_red": float(r.prob_red or 0.0),
+        }
+        for r in hourly_rows
+    ]
+
+    daily = [
+        {
+            "bucket": r.bucket.isoformat(),
+            "total": int(r.total),
+            "prob_blue": float(r.prob_blue or 0.0),
+            "prob_green": float(r.prob_green or 0.0),
+            "prob_yellow": float(r.prob_yellow or 0.0),
+            "prob_red": float(r.prob_red or 0.0),
+        }
+        for r in daily_rows
+    ]
+
+    return {
+        "timezone": "UTC",
+        "days": days,
+        "hourly": hourly,
+        "daily": daily,
+    }
+
+
 @router.delete("")
 async def delete_rounds(
     db: AsyncSession = Depends(get_db),

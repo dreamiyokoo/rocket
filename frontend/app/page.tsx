@@ -633,6 +633,7 @@ export default function Home() {
           >
             {soundEnabled ? "🔔" : "🔕"}
           </button>
+          <a href="/probability-trends" className="text-sm text-cyan-300 hover:text-cyan-200 transition-colors">確率推移 →</a>
           <a href="/input" className="text-sm text-gray-400 hover:text-white transition-colors">入力画面 →</a>
         </div>
       </div>
