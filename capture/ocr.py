@@ -102,7 +102,10 @@ def ocr_history_bar(img: np.ndarray, crop: list[int], scale: int, debug: bool = 
 
     # PSM 11: スパーステキスト（ピル間の空白に強い）
     text = pytesseract.image_to_string(white_mask, config="--oem 1 --psm 11 -c tessedit_char_whitelist=0123456789.")
-    values = re.findall(r"\d+\.\d+", text)
+    if debug:
+        print(f"[DEBUG] OCR raw text: {repr(text)}")
+    # 小数形式 + 3桁以上の整数（501 等、末尾の .00 が見切れて読まれる場合のフォールバック）
+    values = re.findall(r"\d+\.\d+|\b\d{3,}\b", text)
     # 小数点以下3桁以上は誤認識 → 小数2桁に丸める
     result = []
     for v in values:
@@ -218,15 +221,20 @@ def run(cfg: dict, once: bool = False, debug: bool = False) -> None:
                 # 初回は最新1件だけ投稿
                 new_values = [values_asc[-1]]
             else:
-                # 前回の最新値が今回リストに存在するか探す
-                prev_latest = last_values[-1]
-                try:
-                    idx = values_asc.index(prev_latest)
-                    # idx+1 以降が新しい値
-                    new_values = values_asc[idx + 1:]
-                except ValueError:
-                    # 前回値が見つからない場合（値が大きく変わった等）→ 最新1件を投稿
+                # last_values の末尾 k 件と values_asc の先頭 k 件が一致する最大 k を探す
+                # 例: last=[A,B,C,1.01] values=[B,C,1.01,X] → k=3 → new=[X]
+                # こうすることで同じ値（1.01 連続等）の誤挿入を防ぐ
+                max_check = min(len(last_values), len(values_asc))
+                best_overlap = 0
+                for k in range(max_check, 0, -1):
+                    if last_values[-k:] == values_asc[:k]:
+                        best_overlap = k
+                        break
+                if best_overlap == 0:
+                    # 重複がまったくない場合（大きくリストが変わった等）→ 最新1件を投稿
                     new_values = [values_asc[-1]]
+                else:
+                    new_values = values_asc[best_overlap:]
 
             if new_values:
                 print(f"[INFO] 新しい爆発倍率検出: {new_values}")

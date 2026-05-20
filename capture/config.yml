@@ -15,7 +15,7 @@ api:
 capture:
   # 履歴バー（直近4件のピル）のクロップ座標 [y_start, y_end, x_start, x_end]
   # 実機 1080x2460 の場合の値。端末が変わったら手動で調整
-  bar_crop: [695, 755, 240, 820]
+  bar_crop: [695, 755, 150, 820]
   # ポーリング間隔（秒）
   poll_interval: 5
   # OCR 拡大倍率
