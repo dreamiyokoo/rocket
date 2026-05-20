@@ -18,10 +18,10 @@ function multiplierBadgeClass(v: number): string {
 }
 
 function predictedBandDotClass(band: PredictedBand): string {
-  if (band === "blue") return "bg-blue-200";
-  if (band === "green") return "bg-green-200";
-  if (band === "yellow") return "bg-yellow-200";
-  return "bg-red-200";
+  if (band === "blue") return "bg-blue-600";
+  if (band === "green") return "bg-green-600";
+  if (band === "yellow") return "bg-yellow-500";
+  return "bg-red-700";
 }
 
 type Round = { id: number; multiplier: number; recorded_at: string };
@@ -72,9 +72,9 @@ function pruneEvalArchive(archive: RoundEvalArchive): RoundEvalArchive {
 }
 
 function bandFromMultiplier(v: number): PredictedBand {
-  if (v <= 2.0) return "blue";
-  if (v <= 5.0) return "green";
-  if (v <= 10.0) return "yellow";
+  if (v < 2.0) return "blue";
+  if (v < 5.0) return "green";
+  if (v < 10.0) return "yellow";
   return "red";
 }
 

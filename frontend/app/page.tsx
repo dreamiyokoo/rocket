@@ -366,10 +366,10 @@ function multiplierBadgeClass(v: number): string {
 }
 
 function predictedBandDotClass(band: PredictedBand): string {
-  if (band === "blue") return "bg-blue-200";
-  if (band === "green") return "bg-green-200";
-  if (band === "yellow") return "bg-yellow-200";
-  return "bg-red-200";
+  if (band === "blue") return "bg-blue-600";
+  if (band === "green") return "bg-green-600";
+  if (band === "yellow") return "bg-yellow-500";
+  return "bg-red-700";
 }
 
 function loadEvalArchive(): RoundEvalArchive {
