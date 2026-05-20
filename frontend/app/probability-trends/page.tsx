@@ -290,7 +290,7 @@ export default function ProbabilityTrendsPage() {
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-white">時間帯別 確率統計</h2>
-              <span className="text-xs text-gray-400">0〜23時集計（全データ / UTC）</span>
+              <span className="text-xs text-gray-400">0〜23時集計（全データ / JST）</span>
             </div>
 
             <div className="mt-4 overflow-x-auto">

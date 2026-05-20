@@ -157,7 +157,7 @@ async def get_probability_trends(
         text(
             """
             SELECT
-                EXTRACT(HOUR FROM recorded_at AT TIME ZONE 'UTC')::int AS hour,
+                EXTRACT(HOUR FROM recorded_at AT TIME ZONE 'Asia/Tokyo')::int AS hour,
                 COUNT(*) AS total,
                 AVG(CASE WHEN multiplier <= 1.2 THEN 1.0 ELSE 0.0 END) AS prob_1_2x,
                 AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_2_0x,
