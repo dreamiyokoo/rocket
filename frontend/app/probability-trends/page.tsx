@@ -167,6 +167,40 @@ function TrendChart({
   );
 }
 
+function HourlyCountBarChart({
+  stats,
+}: {
+  stats: Array<{ hour: number; sample: number }>;
+}) {
+  if (stats.length === 0) {
+    return <p className="text-sm text-gray-500">表示できるデータがありません。</p>;
+  }
+
+  const maxSample = Math.max(...stats.map((s) => s.sample), 1);
+
+  return (
+    <div>
+      <div className="flex items-end gap-1 h-44 rounded-xl border border-gray-800 bg-gray-950/40 p-3 overflow-x-auto">
+        {stats.map((s) => {
+          const h = Math.max(2, Math.round((s.sample / maxSample) * 140));
+          return (
+            <div key={s.hour} className="flex flex-col items-center min-w-[24px] gap-1">
+              <div className="text-[9px] text-gray-400 leading-none">{s.sample.toLocaleString()}</div>
+              <div
+                className="w-4 rounded-t bg-cyan-400/80"
+                style={{ height: `${h}px` }}
+                title={`${String(s.hour).padStart(2, "0")}:00 ${s.sample.toLocaleString()}件`}
+              />
+              <div className="text-[10px] text-gray-500">{String(s.hour).padStart(2, "0")}</div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-gray-500">時間帯ごとの件数（全データ/JST）</p>
+    </div>
+  );
+}
+
 export default function ProbabilityTrendsPage() {
   const [days, setDays] = useState(14);
   const [loading, setLoading] = useState(true);
@@ -291,6 +325,10 @@ export default function ProbabilityTrendsPage() {
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-white">時間帯別 確率統計</h2>
               <span className="text-xs text-gray-400">0〜23時集計（全データ / JST）</span>
+            </div>
+
+            <div className="mt-4">
+              <HourlyCountBarChart stats={hourlyStats.map((row) => ({ hour: row.hour, sample: row.sample }))} />
             </div>
 
             <div className="mt-4 overflow-x-auto">
