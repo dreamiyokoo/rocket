@@ -153,6 +153,24 @@ async def get_probability_trends(
         params,
     )
 
+    hourly_stats_rows = await db.execute(
+        text(
+            """
+            SELECT
+                EXTRACT(HOUR FROM recorded_at AT TIME ZONE 'UTC')::int AS hour,
+                COUNT(*) AS total,
+                AVG(CASE WHEN multiplier <= 1.2 THEN 1.0 ELSE 0.0 END) AS prob_1_2x,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_2_0x,
+                AVG(CASE WHEN multiplier > 2.0 AND multiplier <= 5.0 THEN 1.0 ELSE 0.0 END) AS prob_green,
+                AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
+                AVG(CASE WHEN multiplier > 10.0 THEN 1.0 ELSE 0.0 END) AS prob_red
+            FROM rounds
+            GROUP BY 1
+            ORDER BY 1 ASC
+            """
+        )
+    )
+
     hourly = [
         {
             "bucket": r.bucket.isoformat(),
@@ -181,11 +199,40 @@ async def get_probability_trends(
         for r in daily_rows
     ]
 
+    hourly_stats_map = {
+        int(r.hour): {
+            "hour": int(r.hour),
+            "total": int(r.total),
+            "prob_1_2x": float(r.prob_1_2x or 0.0),
+            "prob_2_0x": float(r.prob_2_0x or 0.0),
+            "prob_green": float(r.prob_green or 0.0),
+            "prob_yellow": float(r.prob_yellow or 0.0),
+            "prob_red": float(r.prob_red or 0.0),
+        }
+        for r in hourly_stats_rows
+    }
+    hourly_stats = [
+        hourly_stats_map.get(
+            h,
+            {
+                "hour": h,
+                "total": 0,
+                "prob_1_2x": 0.0,
+                "prob_2_0x": 0.0,
+                "prob_green": 0.0,
+                "prob_yellow": 0.0,
+                "prob_red": 0.0,
+            },
+        )
+        for h in range(24)
+    ]
+
     return {
         "timezone": "UTC",
         "days": days,
         "hourly": hourly,
         "daily": daily,
+        "hourly_stats": hourly_stats,
     }
 
 

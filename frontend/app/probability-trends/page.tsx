@@ -21,6 +21,15 @@ type TrendsResponse = {
   days: number;
   hourly: TrendPoint[];
   daily: TrendPoint[];
+  hourly_stats?: Array<{
+    hour: number;
+    total: number;
+    prob_1_2x: number;
+    prob_2_0x: number;
+    prob_green: number;
+    prob_yellow: number;
+    prob_red: number;
+  }>;
 };
 
 const CHART_W = 900;
@@ -207,7 +216,7 @@ export default function ProbabilityTrendsPage() {
   }, [data]);
 
   const hourlyStats = useMemo(() => {
-    if (!data || data.hourly.length === 0) return [] as Array<{
+    if (!data || !data.hourly_stats || data.hourly_stats.length === 0) return [] as Array<{
       hour: number;
       sample: number;
       p12: number;
@@ -217,52 +226,15 @@ export default function ProbabilityTrendsPage() {
       red: number;
     }>;
 
-    const buckets = new Map<number, {
-      sample: number;
-      p12Weighted: number;
-      p20Weighted: number;
-      greenWeighted: number;
-      yellowWeighted: number;
-      redWeighted: number;
-    }>();
-
-    for (let h = 0; h < 24; h++) {
-      buckets.set(h, {
-        sample: 0,
-        p12Weighted: 0,
-        p20Weighted: 0,
-        greenWeighted: 0,
-        yellowWeighted: 0,
-        redWeighted: 0,
-      });
-    }
-
-    for (const point of data.hourly) {
-      const d = new Date(point.bucket);
-      if (Number.isNaN(d.getTime())) continue;
-      const hour = d.getHours();
-      const item = buckets.get(hour);
-      if (!item) continue;
-      item.sample += point.total;
-      item.p12Weighted += point.prob_1_2x * point.total;
-      item.p20Weighted += point.prob_2_0x * point.total;
-      item.greenWeighted += point.prob_green * point.total;
-      item.yellowWeighted += point.prob_yellow * point.total;
-      item.redWeighted += point.prob_red * point.total;
-    }
-
-    return Array.from(buckets.entries()).map(([hour, item]) => {
-      const denom = item.sample || 1;
-      return {
-        hour,
-        sample: item.sample,
-        p12: item.p12Weighted / denom,
-        p20: item.p20Weighted / denom,
-        green: item.greenWeighted / denom,
-        yellow: item.yellowWeighted / denom,
-        red: item.redWeighted / denom,
-      };
-    });
+    return data.hourly_stats.map((row) => ({
+      hour: row.hour,
+      sample: row.total,
+      p12: row.prob_1_2x,
+      p20: row.prob_2_0x,
+      green: row.prob_green,
+      yellow: row.prob_yellow,
+      red: row.prob_red,
+    }));
   }, [data]);
 
   return (
@@ -318,7 +290,7 @@ export default function ProbabilityTrendsPage() {
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-white">時間帯別 確率統計</h2>
-              <span className="text-xs text-gray-400">0〜23時集計（加重平均）</span>
+              <span className="text-xs text-gray-400">0〜23時集計（全データ / UTC）</span>
             </div>
 
             <div className="mt-4 overflow-x-auto">
