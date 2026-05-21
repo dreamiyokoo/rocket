@@ -165,10 +165,12 @@ async def get_probability_trends(
                 AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
                 AVG(CASE WHEN multiplier > 10.0 THEN 1.0 ELSE 0.0 END) AS prob_red
             FROM rounds
+            WHERE recorded_at >= NOW() - (:days * INTERVAL '1 day')
             GROUP BY 1
             ORDER BY 1 ASC
             """
-        )
+        ),
+        params,
     )
 
     hourly = [
@@ -229,6 +231,9 @@ async def get_probability_trends(
 
     return {
         "timezone": "UTC",
+        "hourly_timezone": "UTC",
+        "daily_timezone": "UTC",
+        "hourly_stats_timezone": "Asia/Tokyo",
         "days": days,
         "hourly": hourly,
         "daily": daily,

@@ -18,6 +18,9 @@ type TrendPoint = {
 
 type TrendsResponse = {
   timezone: string;
+  hourly_timezone?: string;
+  daily_timezone?: string;
+  hourly_stats_timezone?: string;
   days: number;
   hourly: TrendPoint[];
   daily: TrendPoint[];
@@ -58,13 +61,29 @@ function pct(v: number): string {
   return `${(v * 100).toFixed(1)}%`;
 }
 
-function timeLabel(iso: string, mode: "hourly" | "daily"): string {
+function timeLabel(iso: string, mode: "hourly" | "daily", timezone: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "-";
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      month: "2-digit",
+      day: "2-digit",
+      ...(mode === "hourly" ? { hour: "2-digit", hour12: false } : {}),
+    }).formatToParts(d);
+  } catch {
+    parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      month: "2-digit",
+      day: "2-digit",
+      ...(mode === "hourly" ? { hour: "2-digit", hour12: false } : {}),
+    }).formatToParts(d);
+  }
+  const mm = parts.find((p) => p.type === "month")?.value ?? "--";
+  const dd = parts.find((p) => p.type === "day")?.value ?? "--";
   if (mode === "daily") return `${mm}/${dd}`;
-  const hh = String(d.getHours()).padStart(2, "0");
+  const hh = parts.find((p) => p.type === "hour")?.value ?? "--";
   return `${mm}/${dd} ${hh}:00`;
 }
 
@@ -72,10 +91,12 @@ function TrendChart({
   title,
   points,
   mode,
+  timezone,
 }: {
   title: string;
   points: TrendPoint[];
   mode: "hourly" | "daily";
+  timezone: string;
 }) {
   if (points.length === 0) {
     return (
@@ -149,7 +170,7 @@ function TrendChart({
                 fill="#94a3b8"
                 fontSize="10"
               >
-                {timeLabel(p.bucket, mode)}
+                {timeLabel(p.bucket, mode, timezone)}
               </text>
             );
           })}
@@ -169,6 +190,7 @@ function TrendChart({
 
 function HourlyProbabilityBarChart({
   stats,
+  timezone,
 }: {
   stats: Array<{
     hour: number;
@@ -178,6 +200,7 @@ function HourlyProbabilityBarChart({
     yellow: number;
     red: number;
   }>;
+  timezone: string;
 }) {
   if (stats.length === 0) {
     return <p className="text-sm text-gray-500">表示できるデータがありません。</p>;
@@ -228,7 +251,7 @@ function HourlyProbabilityBarChart({
         <span className="text-yellow-300">Yellow</span>
         <span className="text-red-300">Red</span>
       </div>
-      <p className="mt-1 text-xs text-gray-500">時間帯ごとの確率比較（全データ/JST）</p>
+      <p className="mt-1 text-xs text-gray-500">時間帯ごとの確率比較（集計期間/{timezone}）</p>
     </div>
   );
 }
@@ -271,7 +294,7 @@ export default function ProbabilityTrendsPage() {
     if (!data || data.daily.length === 0) return null;
     const last = data.daily[data.daily.length - 1];
     return {
-      date: timeLabel(last.bucket, "daily"),
+      date: timeLabel(last.bucket, "daily", data.daily_timezone ?? data.timezone),
       total: last.total,
       p12: pct(last.prob_1_2x),
       p20: pct(last.prob_2_0x),
@@ -328,7 +351,7 @@ export default function ProbabilityTrendsPage() {
             {d}日
           </button>
         ))}
-        <span className="ml-auto text-xs text-gray-500">timezone: UTC</span>
+        <span className="ml-auto text-xs text-gray-500">timezone: {data?.timezone ?? "UTC"}</span>
       </div>
 
       {loading && <p className="text-gray-400">読み込み中...</p>}
@@ -351,12 +374,19 @@ export default function ProbabilityTrendsPage() {
             </div>
           )}
 
-          <TrendChart title="時間別 確率推移" points={data.hourly} mode="hourly" />
+          <TrendChart
+            title="時間別 確率推移"
+            points={data.hourly}
+            mode="hourly"
+            timezone={data.hourly_timezone ?? data.timezone}
+          />
 
           <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-5">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-white">時間帯別 確率統計</h2>
-              <span className="text-xs text-gray-400">0〜23時集計（全データ / JST）</span>
+              <span className="text-xs text-gray-400">
+                0〜23時集計（{data.days}日 / {data.hourly_stats_timezone ?? data.timezone}）
+              </span>
             </div>
 
             <div className="mt-4">
@@ -369,6 +399,7 @@ export default function ProbabilityTrendsPage() {
                   yellow: row.yellow,
                   red: row.red,
                 }))}
+                timezone={data.hourly_stats_timezone ?? data.timezone}
               />
             </div>
 
@@ -402,7 +433,12 @@ export default function ProbabilityTrendsPage() {
             </div>
           </div>
 
-          <TrendChart title="日別 確率推移" points={data.daily} mode="daily" />
+          <TrendChart
+            title="日別 確率推移"
+            points={data.daily}
+            mode="daily"
+            timezone={data.daily_timezone ?? data.timezone}
+          />
         </>
       )}
     </main>
