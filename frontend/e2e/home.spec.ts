@@ -25,6 +25,14 @@ async function mockReadyAnalysisWithRecommendation(page: Page) {
           chart: [{ upper: 3.75, middle: 2.25, lower: 1.01 }],
         },
         chart_data: [{ index: 1, value: 2.0 }],
+        red_rhythm: {
+          rounds_since_last: 4,
+          average_gap: 6.5,
+          last_gap: 5,
+          current_streak: 0,
+          max_streak: 2,
+          state: "normal",
+        },
         recommendation: {
           volatility_cv: 0.62,
           regime: "medium",
@@ -83,6 +91,14 @@ async function mockReadyAnalysisWithNoEntry(page: Page, noEntryReasons: string[]
           chart: [{ upper: 3.75, middle: 2.25, lower: 1.01 }],
         },
         chart_data: [{ index: 1, value: 2.0 }],
+        red_rhythm: {
+          rounds_since_last: 4,
+          average_gap: 6.5,
+          last_gap: 5,
+          current_streak: 0,
+          max_streak: 2,
+          state: "normal",
+        },
         recommendation: {
           volatility_cv: 0.62,
           regime: "medium",
@@ -140,6 +156,9 @@ test("home page renders recommendation panel values", async ({ page }) => {
 
   await expect(page.getByText("推奨ライン")).toBeVisible();
   await expect(page.getByText("中ボラ")).toBeVisible();
+  await expect(page.getByText("直近赤から")).toBeVisible();
+  await expect(page.getByText("平均間隔")).toBeVisible();
+  await expect(page.getByText("通常ペース")).toBeVisible();
   await expect(page.getByText("🔵 Blue").first()).toBeVisible();
   await expect(page.getByText("🟢 Green").first()).toBeVisible();
 });

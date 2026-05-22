@@ -80,10 +80,25 @@ class TestGetAnalysis:
         assert "history" in data["prob_1_2x"]
         assert "current" in data["prob_1_2x"]
         assert "recommendation" in data
+        assert "red_rhythm" in data
         assert data["recommendation"]["regime"] in ("low", "medium", "high")
         assert "floor_line" in data["recommendation"]
         assert "target_line" in data["recommendation"]
         assert "analyzed_at" in data
+
+    def test_red_rhythm_shape_when_red_history_exists(self):
+        values = [1.5] * (WINDOW - 2) + [10.0, 25.0]
+        app.dependency_overrides[get_db] = lambda: _make_db(values)
+        app.dependency_overrides[get_redis] = lambda: _make_redis()
+        data = TestClient(app).get("/api/v1/analysis").json()
+        assert data["red_rhythm"] == {
+            "rounds_since_last": 0,
+            "average_gap": 1,
+            "last_gap": 1,
+            "current_streak": 2,
+            "max_streak": 2,
+            "state": "clustered",
+        }
 
     def test_ready_true_no_entry_shape(self):
         values = [2.0] * WINDOW
