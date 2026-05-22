@@ -75,6 +75,16 @@ class NoEntry:
 
 
 @dataclass
+class RedRhythm:
+    rounds_since_last: int
+    average_gap: float | None
+    last_gap: int | None
+    current_streak: int
+    max_streak: int
+    state: str
+
+
+@dataclass
 class AnalysisResult:
     ready: bool
     total_rounds: int
@@ -99,6 +109,7 @@ class AnalysisResult:
     macd_chart: list[MacdPoint | None] = field(default_factory=list)
     recommendation: Recommendation | None = None
     no_entry: NoEntry | None = None
+    red_rhythm: RedRhythm | None = None
     history: list[WindowStats] = field(default_factory=list)
     chart_data: list[float] = field(default_factory=list)
 
@@ -270,6 +281,49 @@ def _no_entry(multipliers: list[float], window: list[float]) -> NoEntry:
     )
 
 
+def _red_rhythm(multipliers: list[float]) -> RedRhythm | None:
+    red_indices = [idx for idx, value in enumerate(multipliers) if value >= 10.0]
+    if not red_indices:
+        return None
+
+    gaps = [curr - prev for prev, curr in zip(red_indices, red_indices[1:])]
+    average_gap = round(statistics.mean(gaps), 2) if gaps else None
+    last_gap = gaps[-1] if gaps else None
+    rounds_since_last = len(multipliers) - 1 - red_indices[-1]
+
+    current_streak = 0
+    for value in reversed(multipliers):
+        if value >= 10.0:
+            current_streak += 1
+        else:
+            break
+
+    max_streak = 0
+    streak = 0
+    for value in multipliers:
+        if value >= 10.0:
+            streak += 1
+            max_streak = max(max_streak, streak)
+        else:
+            streak = 0
+
+    if current_streak >= 2:
+        state = "clustered"
+    elif average_gap is not None and rounds_since_last >= max(2, math.ceil(average_gap * 1.5)):
+        state = "overdue"
+    else:
+        state = "normal"
+
+    return RedRhythm(
+        rounds_since_last=rounds_since_last,
+        average_gap=average_gap,
+        last_gap=last_gap,
+        current_streak=current_streak,
+        max_streak=max_streak,
+        state=state,
+    )
+
+
 # ── Main calculation ─────────────────────────────────────────────────────────
 
 def calculate(
@@ -357,6 +411,7 @@ def calculate(
         macd_chart=macd_chart,
         recommendation=_recommendation(recent),
         no_entry=_no_entry(multipliers, recent),
+        red_rhythm=_red_rhythm(multipliers),
         history=history,
         chart_data=chart_data,
     )

@@ -30,6 +30,15 @@ type Recommendation = {
   entry_ok: boolean;
 };
 
+type RedRhythm = {
+  rounds_since_last: number;
+  average_gap: number | null;
+  last_gap: number | null;
+  current_streak: number;
+  max_streak: number;
+  state: "clustered" | "normal" | "overdue";
+};
+
 type NoEntryReason = "low_consecutive" | "post_spike" | "low_volatility" | "low_expected_value";
 
 type NoEntryData = {
@@ -71,6 +80,7 @@ type AnalysisData = {
   bollinger_bands?: { current: BB | null; chart: (BB | null)[] };
   chart_data?: { index: number; value: number }[];
   recommendation?: Recommendation;
+  red_rhythm?: RedRhythm;
   no_entry?: NoEntryData;
   ml_prediction?: MLPrediction;
   analyzed_at?: string;
@@ -276,6 +286,39 @@ function MultiplierChart({ data }: { data: AnalysisData }) {
   );
 }
 
+function RedOnlyChart({ data }: { data: AnalysisData }) {
+  const cd = data.chart_data ?? [];
+  const redValues = cd.filter((d) => d.value >= 10).map((d) => d.value);
+  const redCount = redValues.length;
+  const redPoints = redValues.map((value, i) => [xOf(i, redCount), yLog(value)] as const);
+
+  if (redValues.length === 0) {
+    return <p className="text-sm text-gray-500 py-8 text-center">赤履歴なし</p>;
+  }
+
+  return (
+    <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-auto">
+      {[10, 20, 50, 100, 200, 501].map((t) => {
+        const y = yLog(t);
+        if (y < MT || y > MT + PH) return null;
+        return (
+          <g key={t}>
+            <line x1={ML} y1={y} x2={ML + PW} y2={y} stroke="#4b5563" strokeDasharray="4 2" />
+            <text x={ML - 4} y={y + 4} textAnchor="end" fill="#9ca3af" fontSize="10">{t}</text>
+          </g>
+        );
+      })}
+      <path d={toPath(redPoints)} fill="none" stroke="#f87171" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      {redPoints.map((point, i) => {
+        return <circle key={i} cx={point[0]} cy={point[1]} r="2.8" fill="#fca5a5" />;
+      })}
+      <line x1={ML} y1={MT + PH} x2={ML + PW} y2={MT + PH} stroke="#4b5563" />
+      <text x={ML} y={VH} fill="#6b7280" fontSize="10">1</text>
+      <text x={ML + PW} y={VH} textAnchor="end" fill="#6b7280" fontSize="10">{redCount}</text>
+    </svg>
+  );
+}
+
 function RsiChart({ rsi }: { rsi: (number | null)[] }) {
   const n = rsi.length;
   return (
@@ -368,7 +411,7 @@ function predictedBandDotClass(band: PredictedBand): string {
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  type ChartTab = "prob" | "multiplier" | "rsi" | "macd" | "prob_macd";
+  type ChartTab = "prob" | "multiplier" | "red_only" | "rsi" | "macd" | "prob_macd";
   const [data, setData]         = useState<AnalysisData | null>(null);
   const [error, setError]       = useState(false);
   const [rounds, setRounds]     = useState<Round[]>([]);
@@ -662,6 +705,21 @@ export default function Home() {
         const flowColor = { hot: "bg-orange-500 text-white", warm: "bg-green-600 text-white", cold: "bg-gray-600 text-white" }[rec.flow_state];
         const scaleLabel = { 1.5: "1.5倍増額", 1.0: "通常", 0.5: "0.5倍減額" }[rec.stake_scale];
         const prob2x = data.prob_2x?.current ?? 0;
+        const redRhythm = data.red_rhythm;
+        const redStateLabel = redRhythm
+          ? {
+              clustered: "赤が並び中",
+              normal: "通常ペース",
+              overdue: "赤待ち長め",
+            }[redRhythm.state]
+          : null;
+        const redStateColor = redRhythm
+          ? {
+              clustered: "text-red-300",
+              normal: "text-gray-300",
+              overdue: "text-yellow-300",
+            }[redRhythm.state]
+          : null;
         return (
           <section className="bg-gray-900 rounded-xl p-4 space-y-3">
             <div className="flex items-center gap-3">
@@ -702,6 +760,40 @@ export default function Home() {
                 </p>
               )}
             </div>
+
+            {redRhythm && (
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-red-900/60 bg-red-950/30 px-4 py-3 sm:grid-cols-4">
+                <div>
+                  <p className="text-xs text-gray-400">直近赤から</p>
+                  <p className="text-lg font-bold text-red-300">{redRhythm.rounds_since_last}回</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">平均間隔</p>
+                  <p className="text-lg font-bold text-white">{redRhythm.average_gap != null ? `${redRhythm.average_gap}回` : "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">直近連続</p>
+                  <p className="text-lg font-bold text-white">{redRhythm.current_streak}回</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">最大連続</p>
+                  <p className="text-lg font-bold text-white">{redRhythm.max_streak}回</p>
+                </div>
+                <div className="col-span-2">
+                  <p className={`text-xs font-semibold ${redStateColor}`}>
+                    {redStateLabel}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    赤の大きさではなく、出現間隔と連続回数だけを見ています。
+                  </p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-xs text-gray-500">
+                    直近間隔: {redRhythm.last_gap != null ? `${redRhythm.last_gap}回` : "-"}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-3">
               {/* 4段階シグナル */}
@@ -962,6 +1054,7 @@ export default function Home() {
                 { key: "prob",       label: "確率遷移" },
                 { key: "prob_macd",  label: "確率MACD" },
                 { key: "multiplier", label: "倍率履歴" },
+                { key: "red_only",   label: "赤履歴" },
                 { key: "rsi",        label: "RSI" },
                 { key: "macd",       label: "MACD" },
               ] as { key: ChartTab; label: string }[]
@@ -1016,6 +1109,17 @@ export default function Home() {
                 <span><span className="text-gray-400 font-bold">--</span> ボリンジャーバンド</span>
               </div>
               <MultiplierChart data={data} />
+            </div>
+          )}
+
+          {/* Red-only history */}
+          {activeTab === "red_only" && data.chart_data && data.chart_data.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex gap-4 text-xs text-gray-400 flex-wrap">
+                <span><span className="text-red-400 font-bold">■</span> 10x以上のみ</span>
+                <span>非赤ラウンドはギャップとして扱います</span>
+              </div>
+              <RedOnlyChart data={data} />
             </div>
           )}
 

@@ -123,6 +123,14 @@ def _build_response(result, analyzed_at: str) -> dict:
                 and (result.prob_2x or 0) >= 0.50
             ),
         } if result.recommendation else None,
+        "red_rhythm": {
+            "rounds_since_last": result.red_rhythm.rounds_since_last,
+            "average_gap": result.red_rhythm.average_gap,
+            "last_gap": result.red_rhythm.last_gap,
+            "current_streak": result.red_rhythm.current_streak,
+            "max_streak": result.red_rhythm.max_streak,
+            "state": result.red_rhythm.state,
+        } if result.red_rhythm else None,
         "analyzed_at": analyzed_at,
     }
 

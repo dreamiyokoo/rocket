@@ -206,6 +206,33 @@ def test_recommendation_in_calculate_result():
     assert isinstance(rec.target_line, float)
 
 
+def test_red_rhythm_reports_gap_and_streaks():
+    data = [10.0, 1.5, 1.5, 12.0, 1.5, 20.0] + [1.5] * (WINDOW - 6)
+    result = _make(data)
+    assert result.red_rhythm is not None
+    assert result.red_rhythm.average_gap == pytest.approx(2.5)
+    assert result.red_rhythm.last_gap == 2
+    assert result.red_rhythm.rounds_since_last == WINDOW - 6
+    assert result.red_rhythm.current_streak == 0
+    assert result.red_rhythm.max_streak == 1
+    assert result.red_rhythm.state == "overdue"
+
+
+def test_red_rhythm_detects_clustered_reds():
+    data = [1.5] * (WINDOW - 3) + [10.0, 12.0, 15.0]
+    result = _make([2.0] * WINDOW)
+    result = _make(data)
+    assert result.red_rhythm is not None
+    assert result.red_rhythm.current_streak == 3
+    assert result.red_rhythm.max_streak == 3
+    assert result.red_rhythm.state == "clustered"
+
+
+def test_red_rhythm_absent_when_no_red_history():
+    result = _make([2.0] * WINDOW)
+    assert result.red_rhythm is None
+
+
 # ---------- no_entry ----------
 
 def test_no_entry_none_when_not_ready():
