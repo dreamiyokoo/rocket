@@ -37,6 +37,33 @@ def _make_db(scalar_values: list) -> AsyncMock:
     return mock
 
 
+def _make_post_rounds_db(inserted_values: list[float], total: int) -> AsyncMock:
+    """Return a mock AsyncSession for post_rounds with sequential inserts."""
+    mock = AsyncMock()
+    mock.commit = AsyncMock()
+
+    recent_result = MagicMock()
+    recent_result.__iter__ = lambda self: iter([])
+
+    side_effects = [recent_result]
+    for index, value in enumerate(inserted_values, start=1):
+        insert_result = MagicMock()
+        row = MagicMock()
+        row.id = index
+        row.multiplier = value
+        row.recorded_at = MagicMock()
+        row.recorded_at.isoformat.return_value = f"2026-01-01T00:00:{index:02d}"
+        insert_result.fetchone.return_value = row
+        side_effects.append(insert_result)
+
+    total_result = MagicMock()
+    total_result.scalar.return_value = total
+    side_effects.append(total_result)
+
+    mock.execute = AsyncMock(side_effect=side_effects)
+    return mock
+
+
 def _make_db_with_rows(rows: list, count: int) -> AsyncMock:
     """Return a mock AsyncSession for get_rounds (rows then scalar count)."""
     mock = AsyncMock()
@@ -63,7 +90,7 @@ def clear_overrides():
 class TestPostRounds:
     def test_post_rounds_success(self):
         mock_redis = AsyncMock()
-        app.dependency_overrides[get_db] = lambda: _make_db([None, 5])
+        app.dependency_overrides[get_db] = lambda: _make_post_rounds_db([1.5, 2.0, 3.0], 5)
         app.dependency_overrides[get_current_user] = lambda: _CURRENT_USER
         app.dependency_overrides[get_redis] = lambda: mock_redis
 
@@ -80,7 +107,7 @@ class TestPostRounds:
 
     def test_post_rounds_ready_when_total_exceeds_threshold(self):
         mock_redis = AsyncMock()
-        app.dependency_overrides[get_db] = lambda: _make_db([None, 20])
+        app.dependency_overrides[get_db] = lambda: _make_post_rounds_db([1.5], 20)
         app.dependency_overrides[get_current_user] = lambda: _CURRENT_USER
         app.dependency_overrides[get_redis] = lambda: mock_redis
 
