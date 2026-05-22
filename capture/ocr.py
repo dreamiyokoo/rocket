@@ -157,12 +157,17 @@ def classify_pill_color(pill_img: np.ndarray, pill_mask: np.ndarray) -> str:
 
 def parse_ocr_number(text: str) -> float | None:
     normalized = text.replace(" ", "").replace("\n", "")
-    match = re.search(r"\d+\.\d+|\b\d{3,}\b", normalized)
-    if not match:
+    decimal_match = re.search(r"\d+\.\d+", normalized)
+    if decimal_match:
+        value = round(float(decimal_match.group(0)), 2)
+        if 1.01 <= value <= 501.00:
+            return value
         return None
-    value = round(float(match.group(0)), 2)
-    if 1.01 <= value <= 501.00:
-        return value
+
+    # 履歴表示は通常 x.xx 形式。整数フォールバックは 501.00 の見切れだけを許可する。
+    if re.search(r"\b501\b", normalized):
+        return 501.0
+
     return None
 
 
@@ -209,6 +214,7 @@ def ocr_candidates_for_pill(pill_img: np.ndarray, pill_mask: np.ndarray) -> list
                 "variant": variant_name,
                 "raw_text": raw_text,
                 "value": value,
+                "has_decimal": "." in raw_text,
                 "confidence": float(np.mean(confs)) if confs else 0.0,
             }
         )
@@ -240,15 +246,24 @@ def choose_pill_value(pill_color: str, candidates: list[dict]) -> tuple[float | 
     if not candidates:
         return None, ""
 
-    ranked = []
-    for candidate in candidates:
-        score = candidate["confidence"]
-        if is_value_consistent_with_color(candidate["value"], pill_color):
-            score += 100
-        ranked.append((score, candidate))
-    ranked.sort(key=lambda item: item[0], reverse=True)
+    consistent_candidates = [
+        candidate for candidate in candidates if is_value_consistent_with_color(candidate["value"], pill_color)
+    ]
+    pool = consistent_candidates if consistent_candidates else candidates
 
-    best = ranked[0][1]
+    decimal_candidates = [candidate for candidate in pool if candidate.get("has_decimal")]
+    if decimal_candidates:
+        pool = decimal_candidates
+
+    best = max(pool, key=lambda candidate: candidate["confidence"])
+
+    # 5/9 のような形差は二値化より raw grayscale の方が残りやすい。
+    gray_candidates = [candidate for candidate in pool if candidate["variant"] == "gray"]
+    if gray_candidates:
+        best_gray = max(gray_candidates, key=lambda candidate: candidate["confidence"])
+        if best_gray["confidence"] + 12 >= best["confidence"]:
+            best = best_gray
+
     corrected = correct_value_with_color(best["value"], pill_color)
     if corrected is not None and corrected != best["value"]:
         return corrected, f"{best['raw_text']} -> {corrected:.2f} ({pill_color})"
