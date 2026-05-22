@@ -1,14 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getValidAccessToken } from "./lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const POLL_INTERVAL = 10_000;
 const WS_RECONNECT_DELAY = 3_000; // WebSocket 切断後の再接続待機（ms）
 const READY_THRESHOLD = 18;
-const EVAL_ARCHIVE_KEY = "round_eval_archive_v3";
-const EVAL_ARCHIVE_UPDATED_AT_KEY = "round_eval_archive_updated_at";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +71,24 @@ type AnalysisData = {
 type Params = { rsi_period: number; macd_fast: number; macd_slow: number; macd_signal: number };
 type Round = { id: number; multiplier: number; recorded_at: string };
 type PredictedBand = "blue" | "green" | "yellow" | "red";
+type EvalStatsRow = {
+  predicted_band: PredictedBand;
+  actual_band: PredictedBand;
+  verdict: "hit" | "miss";
+  count: number;
+};
+type EvalRecentRow = {
+  round_id: number;
+  predicted_band: PredictedBand;
+  actual_band: PredictedBand;
+  actual_multiplier: number;
+  verdict: "hit" | "miss";
+  evaluated_at: string;
+};
+type EvalStatsResponse = {
+  by_band: EvalStatsRow[];
+  recent: EvalRecentRow[];
+};
 type RoundEval = {
   predicted_band: PredictedBand;
   actual_band: PredictedBand;
@@ -85,6 +100,8 @@ type RoundEval = {
   evaluated_at: string;
 };
 type RoundEvalArchive = Record<string, RoundEval>;
+
+const SUMMARY_BANDS: PredictedBand[] = ["red", "yellow", "green", "blue"];
 
 const DEFAULT_PARAMS: Params = { rsi_period: 14, macd_fast: 12, macd_slow: 26, macd_signal: 9 };
 
@@ -372,15 +389,63 @@ function predictedBandDotClass(band: PredictedBand): string {
   return "bg-red-700";
 }
 
-function loadEvalArchive(): RoundEvalArchive {
-  try {
-    const raw = localStorage.getItem(EVAL_ARCHIVE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as RoundEvalArchive;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
+function bandLabel(band: PredictedBand): string {
+  if (band === "blue") return "1x台";
+  if (band === "green") return "2x以上";
+  if (band === "yellow") return "5x以上";
+  return "10x以上";
+}
+
+function bandLabelJa(band: PredictedBand): string {
+  if (band === "blue") return "青";
+  if (band === "green") return "緑";
+  if (band === "yellow") return "黄";
+  return "赤";
+}
+
+function isOverResult(predictedBand: PredictedBand, actualBand: PredictedBand): boolean {
+  if (predictedBand === "green") return actualBand === "yellow" || actualBand === "red";
+  if (predictedBand === "yellow") return actualBand === "red";
+  return false;
+}
+
+function buildPredictionSummary(rows: EvalStatsRow[]) {
+  return SUMMARY_BANDS.map((band) => {
+    const relevant = rows.filter((row) => row.predicted_band === band);
+    const predictedCount = relevant.reduce((sum, row) => sum + row.count, 0);
+    const hitCount = relevant
+      .filter((row) => row.verdict === "hit")
+      .reduce((sum, row) => sum + row.count, 0);
+    const overCount = band === "blue" || band === "red"
+      ? null
+      : relevant
+          .filter((row) => isOverResult(row.predicted_band, row.actual_band))
+          .reduce((sum, row) => sum + row.count, 0);
+
+    return {
+      band,
+      predictedCount,
+      hitCount,
+      overCount,
+      hitRate: predictedCount > 0 ? (hitCount / predictedCount) * 100 : null,
+    };
+  });
+}
+
+function buildEvalArchive(rows: EvalRecentRow[]): RoundEvalArchive {
+  const archive: RoundEvalArchive = {};
+  for (const row of rows) {
+    archive[String(row.round_id)] = {
+      predicted_band: row.predicted_band,
+      actual_band: row.actual_band,
+      actual: row.actual_multiplier,
+      verdict: row.verdict,
+      emoji: row.verdict === "hit" ? "✅" : "●",
+      label: `予測:${bandLabel(row.predicted_band)} 実績:${bandLabel(row.actual_band)}`,
+      evaluated_at: row.evaluated_at,
+    };
   }
+  return archive;
 }
 
 // ── Main Page ────────────────────────────────────────────────────────────────
@@ -391,6 +456,7 @@ export default function Home() {
   const [error, setError]       = useState(false);
   const [rounds, setRounds]     = useState<Round[]>([]);
   const [evalArchive, setEvalArchive] = useState<RoundEvalArchive>({});
+  const [evalStats, setEvalStats] = useState<EvalStatsResponse | null>(null);
   const [params, setParams]     = useState<Params>(DEFAULT_PARAMS);
   const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
@@ -399,14 +465,8 @@ export default function Home() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const paramsRef = useRef<Params>(params);
   const prevEntryOkRef = useRef<boolean>(false);
-  // 予測保留: 最新ラウンドIDと予測バンドを保持し、次回更新時に照合
-  const pendingPredRef = useRef<{ roundId: number; band: PredictedBand; line?: number } | null>(null);
 
   useEffect(() => { paramsRef.current = params; }, [params]);
-
-  useEffect(() => {
-    setEvalArchive(loadEvalArchive());
-  }, []);
 
   const fetchRounds = useCallback(async () => {
     try {
@@ -434,30 +494,30 @@ export default function Home() {
     }
   }, []);
 
+  const fetchEvalStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/evals/stats`, { cache: "no-store" });
+      if (!res.ok) return;
+      const evalData = await res.json() as EvalStatsResponse;
+      setEvalStats(evalData);
+      setEvalArchive(buildEvalArchive(evalData.recent));
+    } catch {
+      // best-effort
+    }
+  }, []);
+
   useEffect(() => {
     fetchData(params);
     fetchRounds();
-    setEvalArchive(loadEvalArchive());
+    fetchEvalStats();
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       fetchData(params);
       fetchRounds();
-      setEvalArchive(loadEvalArchive());
+      fetchEvalStats();
     }, POLL_INTERVAL);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [params, fetchData, fetchRounds]);
-
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === EVAL_ARCHIVE_KEY || event.key === EVAL_ARCHIVE_UPDATED_AT_KEY) {
-        setEvalArchive(loadEvalArchive());
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
+  }, [params, fetchData, fetchRounds, fetchEvalStats]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -471,7 +531,7 @@ export default function Home() {
       ws.onmessage = () => {
         fetchData(paramsRef.current);
         fetchRounds();
-        setEvalArchive(loadEvalArchive());
+        fetchEvalStats();
       };
       ws.onclose = () => {
         if (!destroyed) {
@@ -486,7 +546,7 @@ export default function Home() {
     ch.onmessage = () => {
       fetchData(paramsRef.current);
       fetchRounds();
-      setEvalArchive(loadEvalArchive());
+      fetchEvalStats();
     };
 
     return () => {
@@ -495,97 +555,12 @@ export default function Home() {
       ws?.close();
       ch.close();
     };
-  }, [fetchData, fetchRounds]);
+  }, [fetchData, fetchRounds, fetchEvalStats]);
 
   const applySettings = () => {
     setParams(draft);
     setShowSettings(false);
   };
-
-  // ── 予測 → 実績 照合ロジック ─────────────────────────────────────────────
-  // data/rounds が更新されるたびに実行:
-  //   1. pendingPred があれば rounds から該当ラウンドを探して照合し localStorage に保存
-  //   2. 現在の ML 予測バンドを次回照合用に pendingPred に保存
-  useEffect(() => {
-    const ml = data?.ml_prediction;
-    if (!ml?.available) return;
-
-    const latestRound = rounds[0]; // rounds は新しい順
-
-    // 1. 照合: 保留中の予測に対して新しいラウンドが届いたか確認
-    const pending = pendingPredRef.current;
-    if (pending && latestRound && latestRound.id !== pending.roundId) {
-      // pending.roundId の次のラウンドとして latestRound を照合
-      const actual = latestRound.multiplier;
-      const actualBand: PredictedBand =
-        actual > 10.0 ? "red" : actual > 5.0 ? "yellow" : actual > 2.0 ? "green" : "blue";
-      const verdict: "hit" | "miss" = actualBand === pending.band ? "hit" : "miss";
-      const emoji = verdict === "hit" ? "✅" : "●";
-      const bandLabel: Record<PredictedBand, string> = {
-        blue: "1x台", green: "2x以上", yellow: "5x以上", red: "10x以上",
-      };
-      const evaluatedAt = new Date().toISOString();
-      const entry: RoundEval = {
-        predicted_band: pending.band,
-        actual_band: actualBand,
-        predicted_line: pending.line,
-        actual,
-        verdict,
-        emoji,
-        label: `予測:${bandLabel[pending.band]} 実績:${bandLabel[actualBand]}`,
-        evaluated_at: evaluatedAt,
-      };
-      // localStorage に保存
-      const archive = loadEvalArchive();
-      archive[String(latestRound.id)] = entry;
-      const keys = Object.keys(archive);
-      if (keys.length > 500) {
-        const sorted = keys.sort((a, b) => Number(a) - Number(b));
-        sorted.slice(0, keys.length - 500).forEach(k => delete archive[k]);
-      }
-      try {
-        localStorage.setItem(EVAL_ARCHIVE_KEY, JSON.stringify(archive));
-        localStorage.setItem(EVAL_ARCHIVE_UPDATED_AT_KEY, evaluatedAt);
-      } catch { /* quota exceeded 等は無視 */ }
-      setEvalArchive({ ...archive });
-
-      // サーバーに保存（best-effort）
-      const token = getValidAccessToken();
-      if (token) {
-        fetch(`${API_URL}/api/v1/evals`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({
-            round_id: latestRound.id,
-            predicted_band: pending.band,
-            actual_band: actualBand,
-            actual_multiplier: actual,
-            verdict,
-            evaluated_at: evaluatedAt,
-          }),
-        }).catch(() => { /* ネットワークエラーは無視 */ });
-      }
-
-      pendingPredRef.current = null;
-    }
-
-    // 2. 今の予測バンドを保留に登録（次のラウンドで照合）
-    if (latestRound && (!pending || pending.roundId !== latestRound.id)) {
-      const probs = [
-        ml.prob_blue ?? 0,
-        (ml.prob_green ?? 0),
-        (ml.prob_yellow ?? 0),
-        (ml.prob_red ?? 0),
-      ];
-      // 最も確率の高いバンドを予測とする
-      const bands: PredictedBand[] = ["blue", "green", "yellow", "red"];
-      const maxIdx = probs.indexOf(Math.max(...probs));
-      pendingPredRef.current = {
-        roundId: latestRound.id,
-        band: bands[maxIdx],
-      };
-    }
-  }, [data, rounds]);
 
   // データ更新のたびに entry_ok が true なら通知音を鳴らす
   // 最新倍率 ≤ 2.0x → blue.mp3 / 2.01x以上 → notify.mp3
@@ -605,6 +580,7 @@ export default function Home() {
   const remaining = data ? Math.max(0, READY_THRESHOLD - data.total_rounds) : null;
   const rsiNeeded  = READY_THRESHOLD + params.rsi_period;
   const macdNeeded = READY_THRESHOLD + params.macd_slow + params.macd_signal - 2;
+  const predictionSummary = buildPredictionSummary(evalStats?.by_band ?? []);
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-3xl mx-auto space-y-6">
       {/* Header */}
@@ -1214,6 +1190,37 @@ export default function Home() {
           ) : (
             <div className="text-xs text-gray-500">予測未提供（ML準備中）のため判定マークは非表示</div>
           )}
+          <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950/60">
+            <table className="min-w-full text-sm text-gray-200">
+              <thead className="bg-gray-800/80 text-gray-300">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">予測色</th>
+                  <th className="px-3 py-2 text-right font-medium">予測件数</th>
+                  <th className="px-3 py-2 text-right font-medium">的中件数</th>
+                  <th className="px-3 py-2 text-right font-medium">オーバー</th>
+                  <th className="px-3 py-2 text-right font-medium">的中率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {predictionSummary.map((row) => (
+                  <tr key={row.band} className="border-t border-gray-800">
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block h-2.5 w-2.5 rounded-full ${predictedBandDotClass(row.band)}`} aria-hidden="true" />
+                        <span>{bandLabelJa(row.band)}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">{row.predictedCount}</td>
+                    <td className="px-3 py-2 text-right font-mono">{row.hitCount}</td>
+                    <td className="px-3 py-2 text-right font-mono">{row.overCount ?? "-"}</td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {row.hitRate === null ? "-" : `${row.hitRate.toFixed(1)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </main>

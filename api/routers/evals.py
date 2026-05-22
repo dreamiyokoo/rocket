@@ -20,7 +20,7 @@ class EvalPostRequest(BaseModel):
     actual_band: str
     actual_multiplier: float
     verdict: str
-    evaluated_at: str | None = None
+    evaluated_at: datetime | None = None
 
     @field_validator("predicted_band", "actual_band")
     @classmethod
@@ -50,13 +50,13 @@ async def post_eval(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
-    evaluated_at = body.evaluated_at or datetime.now(timezone.utc).isoformat()
+    evaluated_at = body.evaluated_at or datetime.now(timezone.utc)
     await db.execute(
         text(
             "INSERT INTO prediction_evals "
             "(round_id, predicted_band, actual_band, actual_multiplier, verdict, evaluated_at) "
             "VALUES (:round_id, :predicted_band, :actual_band, :actual_multiplier, :verdict, :evaluated_at) "
-            "ON CONFLICT DO NOTHING"
+            "ON CONFLICT (round_id) DO NOTHING"
         ),
         {
             "round_id": body.round_id,

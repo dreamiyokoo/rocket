@@ -7,9 +7,6 @@ import { clearAccessToken, getValidAccessToken } from "../lib/auth";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const READY_THRESHOLD = 18;
 const PREVIEW_POLL_INTERVAL = 3_000;
-const EVAL_ARCHIVE_KEY = "round_eval_archive_v3";
-const EVAL_ARCHIVE_UPDATED_AT_KEY = "round_eval_archive_updated_at";
-const EVAL_ARCHIVE_MAX = 2000;
 
 function multiplierBadgeClass(v: number): string {
   if (v >= 10) return "bg-red-700 text-white";
@@ -46,39 +43,26 @@ type RoundEval = {
   evaluated_at: string;
 };
 type RoundEvalArchive = Record<string, RoundEval>;
+type EvalStatsRow = {
+  predicted_band: PredictedBand;
+  actual_band: PredictedBand;
+  verdict: "hit" | "miss";
+  count: number;
+};
+type EvalRecentRow = {
+  round_id: number;
+  predicted_band: PredictedBand;
+  actual_band: PredictedBand;
+  actual_multiplier: number;
+  verdict: "hit" | "miss";
+  evaluated_at: string;
+};
+type EvalStatsResponse = {
+  by_band: EvalStatsRow[];
+  recent: EvalRecentRow[];
+};
 
-function loadEvalArchive(): RoundEvalArchive {
-  try {
-    const raw = localStorage.getItem(EVAL_ARCHIVE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as RoundEvalArchive;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveEvalArchive(archive: RoundEvalArchive): void {
-  try {
-    localStorage.setItem(EVAL_ARCHIVE_KEY, JSON.stringify(archive));
-    localStorage.setItem(EVAL_ARCHIVE_UPDATED_AT_KEY, String(Date.now()));
-  } catch {
-    // best-effort
-  }
-}
-
-function pruneEvalArchive(archive: RoundEvalArchive): RoundEvalArchive {
-  const ids = Object.keys(archive)
-    .map((k) => Number(k))
-    .filter((n) => Number.isFinite(n))
-    .sort((a, b) => b - a);
-  const keep = new Set(ids.slice(0, EVAL_ARCHIVE_MAX).map((n) => String(n)));
-  const next: RoundEvalArchive = {};
-  for (const [k, v] of Object.entries(archive)) {
-    if (keep.has(k)) next[k] = v;
-  }
-  return next;
-}
+const SUMMARY_BANDS: PredictedBand[] = ["red", "yellow", "green", "blue"];
 
 function bandFromMultiplier(v: number): PredictedBand {
   if (v < 2.0) return "blue";
@@ -92,6 +76,58 @@ function bandLabel(band: PredictedBand): string {
   if (band === "green") return "Green";
   if (band === "yellow") return "Yellow";
   return "Red";
+}
+
+function bandLabelJa(band: PredictedBand): string {
+  if (band === "blue") return "青";
+  if (band === "green") return "緑";
+  if (band === "yellow") return "黄";
+  return "赤";
+}
+
+function isOverResult(predictedBand: PredictedBand, actualBand: PredictedBand): boolean {
+  if (predictedBand === "green") return actualBand === "yellow" || actualBand === "red";
+  if (predictedBand === "yellow") return actualBand === "red";
+  return false;
+}
+
+function buildPredictionSummary(rows: EvalStatsRow[]) {
+  return SUMMARY_BANDS.map((band) => {
+    const relevant = rows.filter((row) => row.predicted_band === band);
+    const predictedCount = relevant.reduce((sum, row) => sum + row.count, 0);
+    const hitCount = relevant
+      .filter((row) => row.verdict === "hit")
+      .reduce((sum, row) => sum + row.count, 0);
+    const overCount = band === "blue" || band === "red"
+      ? null
+      : relevant
+          .filter((row) => isOverResult(row.predicted_band, row.actual_band))
+          .reduce((sum, row) => sum + row.count, 0);
+
+    return {
+      band,
+      predictedCount,
+      hitCount,
+      overCount,
+      hitRate: predictedCount > 0 ? (hitCount / predictedCount) * 100 : null,
+    };
+  });
+}
+
+function buildEvalArchive(rows: EvalRecentRow[]): RoundEvalArchive {
+  const archive: RoundEvalArchive = {};
+  for (const row of rows) {
+    archive[String(row.round_id)] = {
+      predicted_band: row.predicted_band,
+      actual_band: row.actual_band,
+      actual: row.actual_multiplier,
+      verdict: row.verdict,
+      emoji: row.verdict === "hit" ? "✅" : "❌",
+      label: `予測:${bandLabel(row.predicted_band)} / 実績:${bandLabel(row.actual_band)}`,
+      evaluated_at: row.evaluated_at,
+    };
+  }
+  return archive;
 }
 
 function judgePrediction(actual: number, predictedBand: PredictedBand): RoundEval {
@@ -118,11 +154,6 @@ function judgePrediction(actual: number, predictedBand: PredictedBand): RoundEva
   };
 }
 
-function logPredictionEvent(event: string, payload: Record<string, unknown>): void {
-  const now = new Date().toISOString();
-  console.info(`[prediction-log] ${now} ${event}`, payload);
-}
-
 export default function InputPage() {
   const router = useRouter();
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -135,15 +166,12 @@ export default function InputPage() {
   const [rounds, setRounds] = useState<Round[]>([]);
   const [preview, setPreview] = useState<CapturePreview | null>(null);
   const [evalArchive, setEvalArchive] = useState<RoundEvalArchive>({});
+  const [evalStats, setEvalStats] = useState<EvalStatsResponse | null>(null);
   const broadcastRef = useRef<BroadcastChannel | null>(null);
 
   useEffect(() => {
     broadcastRef.current = new BroadcastChannel("rocket:data-changed");
     return () => { broadcastRef.current?.close(); };
-  }, []);
-
-  useEffect(() => {
-    setEvalArchive(loadEvalArchive());
   }, []);
 
   const showToast = (message: string, type: "success" | "error") => {
@@ -186,6 +214,18 @@ export default function InputPage() {
     }
   }, []);
 
+  const fetchEvalStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/evals/stats`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json() as EvalStatsResponse;
+      setEvalStats(data);
+      setEvalArchive(buildEvalArchive(data.recent));
+    } catch {
+      // best-effort
+    }
+  }, []);
+
   const fetchPreview = useCallback(async () => {
     const token = getValidAccessToken();
     if (!token) return;
@@ -211,49 +251,6 @@ export default function InputPage() {
     }
   }, [handleUnauthorized]);
 
-  const fetchCurrentPredictionBand = useCallback(async (): Promise<PredictedBand | null> => {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/analysis`);
-      if (!res.ok) return null;
-      const data = await res.json() as {
-        recommendation?: { target_line?: number | null };
-        ml_prediction?: {
-          available?: boolean;
-          prob_blue?: number;
-          prob_green?: number;
-          prob_yellow?: number;
-          prob_red?: number;
-        };
-      };
-
-      const ml = data.ml_prediction;
-      const hasMl = Boolean(
-        ml?.available
-          && typeof ml.prob_blue === "number"
-          && typeof ml.prob_green === "number"
-          && typeof ml.prob_yellow === "number"
-          && typeof ml.prob_red === "number"
-      );
-
-      if (hasMl) {
-        const probs: Array<{ band: PredictedBand; p: number }> = [
-          { band: "blue", p: ml!.prob_blue! },
-          { band: "green", p: ml!.prob_green! },
-          { band: "yellow", p: ml!.prob_yellow! },
-          { band: "red", p: ml!.prob_red! },
-        ];
-        probs.sort((a, b) => b.p - a.p);
-        return probs[0].band;
-      }
-
-      return null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-
-
   useEffect(() => {
     const token = getValidAccessToken();
     if (!token) {
@@ -263,8 +260,9 @@ export default function InputPage() {
     setCheckingAuth(false);
     fetchStatus();
     fetchRounds();
+    fetchEvalStats();
     fetchPreview();
-  }, [router, fetchStatus, fetchRounds, fetchPreview]);
+  }, [router, fetchStatus, fetchRounds, fetchEvalStats, fetchPreview]);
 
   useEffect(() => {
     if (checkingAuth) return;
@@ -306,7 +304,6 @@ export default function InputPage() {
 
     setSubmitting(true);
     try {
-      const predictedBand = await fetchCurrentPredictionBand();
       const res = await fetch(`${API_URL}/api/v1/rounds`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -327,47 +324,11 @@ export default function InputPage() {
         inserted_rounds?: Round[];
       };
 
-      // Only archive eval for single-value submissions: with multiple values the
-      // same predicted band would be applied to all rounds, which is misleading
-      // because the model state changes after each round.
-      const insertedRounds = postData.inserted_rounds ?? [];
-      if (predictedBand !== null && insertedRounds.length === 1) {
-        setEvalArchive((prev) => {
-          const next: RoundEvalArchive = { ...prev };
-          for (const row of insertedRounds) {
-            const evalResult = judgePrediction(row.multiplier, predictedBand);
-            next[String(row.id)] = evalResult;
-            logPredictionEvent("evaluated", {
-              round_id: row.id,
-              recorded_at: row.recorded_at,
-              predicted_band: evalResult.predicted_band,
-              actual_band: evalResult.actual_band,
-              actual: evalResult.actual,
-              verdict: evalResult.verdict,
-              evaluated_at: evalResult.evaluated_at,
-            });
-          }
-          const pruned = pruneEvalArchive(next);
-          saveEvalArchive(pruned);
-          return pruned;
-        });
-      } else if (predictedBand === null) {
-        logPredictionEvent("skipped", {
-          reason: "prediction_unavailable",
-          inserted_count: insertedRounds.length,
-        });
-      } else {
-        logPredictionEvent("skipped", {
-          reason: "batch_submission",
-          inserted_count: insertedRounds.length,
-          predicted_band: predictedBand,
-        });
-      }
-
       setText("");
-      showToast(`${parsed.values.length}件を送信しました。`, "success");
+
+      showToast(`${postData.inserted}件を送信しました。`, "success");
       broadcastRef.current?.postMessage("update");
-      await Promise.all([fetchStatus(), fetchRounds()]);
+      await Promise.all([fetchStatus(), fetchRounds(), fetchEvalStats()]);
     } catch {
       showToast("送信に失敗しました。", "error");
     } finally {
@@ -400,12 +361,7 @@ export default function InputPage() {
       setStatus({ total_rounds: 0, ready: false, mlAvailable: false });
       setRounds([]);
       setEvalArchive({});
-      try {
-        localStorage.removeItem(EVAL_ARCHIVE_KEY);
-        localStorage.setItem(EVAL_ARCHIVE_UPDATED_AT_KEY, String(Date.now()));
-      } catch {
-        // best-effort
-      }
+      setEvalStats({ by_band: [], recent: [] });
     } catch {
       showToast("リセットに失敗しました。", "error");
     } finally {
@@ -443,6 +399,7 @@ export default function InputPage() {
 
   const remaining = status ? Math.max(0, READY_THRESHOLD - status.total_rounds) : null;
   const previewUpdatedAt = preview ? new Date(preview.captured_at) : null;
+  const predictionSummary = buildPredictionSummary(evalStats?.by_band ?? []);
 
   return (
     <main className="min-h-screen p-6 max-w-xl mx-auto space-y-6">
@@ -617,6 +574,38 @@ export default function InputPage() {
           ) : (
             <div className="text-xs text-gray-500 mt-1">予測未提供（ML準備中）のため判定マークは非表示</div>
           )}
+
+          <div className="mt-4 overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/70">
+            <table className="min-w-full text-sm text-gray-200">
+              <thead className="bg-gray-800/80 text-gray-300">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">予測色</th>
+                  <th className="px-3 py-2 text-right font-medium">予測件数</th>
+                  <th className="px-3 py-2 text-right font-medium">的中件数</th>
+                  <th className="px-3 py-2 text-right font-medium">オーバー</th>
+                  <th className="px-3 py-2 text-right font-medium">的中率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {predictionSummary.map((row) => (
+                  <tr key={row.band} className="border-t border-gray-800">
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block h-2.5 w-2.5 rounded-full ${predictedBandDotClass(row.band)}`} aria-hidden="true" />
+                        <span>{bandLabelJa(row.band)}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">{row.predictedCount}</td>
+                    <td className="px-3 py-2 text-right font-mono">{row.hitCount}</td>
+                    <td className="px-3 py-2 text-right font-mono">{row.overCount ?? "-"}</td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {row.hitRate === null ? "-" : `${row.hitRate.toFixed(1)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
