@@ -56,6 +56,21 @@ async function mockReadyAnalysisWithRecommendation(page: Page) {
       body: JSON.stringify({ rounds: [] }),
     });
   });
+
+  await page.route("**/api/v1/evals/stats", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        by_band: [
+          { predicted_band: "green", actual_band: "green", verdict: "hit", count: 2 },
+          { predicted_band: "green", actual_band: "yellow", verdict: "miss", count: 1 },
+          { predicted_band: "yellow", actual_band: "yellow", verdict: "hit", count: 1 },
+        ],
+        recent: [],
+      }),
+    });
+  });
 }
 
 async function mockReadyAnalysisWithNoEntry(page: Page, noEntryReasons: string[]) {
@@ -142,6 +157,10 @@ test("home page renders recommendation panel values", async ({ page }) => {
   await expect(page.getByText("中ボラ")).toBeVisible();
   await expect(page.getByText("🔵 Blue").first()).toBeVisible();
   await expect(page.getByText("🟢 Green").first()).toBeVisible();
+  await expect(page.getByText("予測収支シミュレーション")).toBeVisible();
+  await expect(page.getByRole("button", { name: "10コイン" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "50コイン" })).toBeVisible();
+  await expect(page.getByText("最低倍率")).toBeVisible();
 });
 
 test("no-entry indicator shows green when no reasons", async ({ page }) => {

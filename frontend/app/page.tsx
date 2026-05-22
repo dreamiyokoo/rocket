@@ -142,6 +142,28 @@ function toPath(pts: (readonly [number, number] | null)[]) {
 function pct(v: number) { return `${(v * 100).toFixed(1)}%`; }
 function fmt(v: number) { return v % 1 === 0 ? v.toString() : v.toFixed(2); }
 
+const COIN_OPTIONS = [10, 50, 100] as const;
+const MIN_PAYOUT_MULTIPLIER: Record<PredictedBand, number> = {
+  blue: 1.01,
+  green: 2.0,
+  yellow: 5.0,
+  red: 10.0,
+};
+
+function calcPredictionPnL(
+  coinSize: number,
+  predictedCount: number,
+  hitCount: number,
+  overCount: number | null,
+  band: PredictedBand,
+) {
+  if (band === "blue") {
+    return 0;
+  }
+  const payoutHits = hitCount + (overCount ?? 0);
+  return Math.round((-coinSize * predictedCount + coinSize * MIN_PAYOUT_MULTIPLIER[band] * payoutHits) * 100) / 100;
+}
+
 // ── Charts ───────────────────────────────────────────────────────────────────
 
 function ProbChart({ data }: { data: AnalysisData }) {
@@ -374,6 +396,7 @@ export default function Home() {
   const [rounds, setRounds]     = useState<Round[]>([]);
   const [evalArchive, setEvalArchive] = useState<RoundEvalArchive>({});
   const [evalStats, setEvalStats] = useState<EvalStatsResponse | null>(null);
+  const [selectedCoinSize, setSelectedCoinSize] = useState<(typeof COIN_OPTIONS)[number]>(10);
   const [params, setParams]     = useState<Params>(DEFAULT_PARAMS);
   const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
@@ -508,6 +531,11 @@ export default function Home() {
   const rsiNeeded  = READY_THRESHOLD + params.rsi_period;
   const macdNeeded = READY_THRESHOLD + params.macd_slow + params.macd_signal - 2;
   const predictionSummary = buildPredictionSummary(evalStats?.by_band ?? []);
+  const predictionSimulation = predictionSummary.map((row) => ({
+    ...row,
+    pnl: calcPredictionPnL(selectedCoinSize, row.predictedCount, row.hitCount, row.overCount, row.band),
+  }));
+  const totalPredictionPnL = predictionSimulation.reduce((sum, row) => sum + row.pnl, 0);
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-3xl mx-auto space-y-6">
       {/* Header */}
@@ -1119,18 +1147,42 @@ export default function Home() {
             <div className="text-xs text-gray-500">予測未提供（ML準備中）のため判定マークは非表示</div>
           )}
           <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-950/60">
+            <div className="flex flex-col gap-3 border-b border-gray-800 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-gray-200">予測収支シミュレーション</p>
+                <p className="text-xs text-gray-500">収支 = -コイン x 予測件数 + コイン x 最低倍率 x (的中件数 + オーバー)</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {COIN_OPTIONS.map((coin) => (
+                  <button
+                    key={coin}
+                    type="button"
+                    onClick={() => setSelectedCoinSize(coin)}
+                    className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      selectedCoinSize === coin
+                        ? "bg-cyan-500 text-slate-950"
+                        : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                    }`}
+                  >
+                    {coin}コイン
+                  </button>
+                ))}
+              </div>
+            </div>
             <table className="min-w-full text-sm text-gray-200">
               <thead className="bg-gray-800/80 text-gray-300">
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">予測色</th>
+                  <th className="px-3 py-2 text-right font-medium">最低倍率</th>
                   <th className="px-3 py-2 text-right font-medium">予測件数</th>
                   <th className="px-3 py-2 text-right font-medium">的中件数</th>
                   <th className="px-3 py-2 text-right font-medium">オーバー</th>
                   <th className="px-3 py-2 text-right font-medium">的中率</th>
+                  <th className="px-3 py-2 text-right font-medium">収支</th>
                 </tr>
               </thead>
               <tbody>
-                {predictionSummary.map((row) => (
+                {predictionSimulation.map((row) => (
                   <tr key={row.band} className="border-t border-gray-800">
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
@@ -1138,15 +1190,32 @@ export default function Home() {
                         <span>{bandLabelJa(row.band)}</span>
                       </div>
                     </td>
+                    <td className="px-3 py-2 text-right font-mono">{fmt(MIN_PAYOUT_MULTIPLIER[row.band])}x</td>
                     <td className="px-3 py-2 text-right font-mono">{row.predictedCount}</td>
                     <td className="px-3 py-2 text-right font-mono">{row.hitCount}</td>
                     <td className="px-3 py-2 text-right font-mono">{row.overCount ?? "-"}</td>
                     <td className="px-3 py-2 text-right font-mono">
                       {row.hitRate === null ? "-" : `${row.hitRate.toFixed(1)}%`}
                     </td>
+                    <td className={`px-3 py-2 text-right font-mono font-semibold ${row.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {row.pnl >= 0 ? "+" : ""}{fmt(row.pnl)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot className="border-t border-gray-700 bg-gray-900/70">
+                <tr>
+                  <td className="px-3 py-2 font-semibold text-gray-200">合計</td>
+                  <td className="px-3 py-2 text-right text-gray-500">-</td>
+                  <td className="px-3 py-2 text-right text-gray-500">-</td>
+                  <td className="px-3 py-2 text-right text-gray-500">-</td>
+                  <td className="px-3 py-2 text-right text-gray-500">-</td>
+                  <td className="px-3 py-2 text-right text-gray-500">{selectedCoinSize}コイン基準</td>
+                  <td className={`px-3 py-2 text-right font-mono font-bold ${totalPredictionPnL >= 0 ? "text-green-300" : "text-red-300"}`}>
+                    {totalPredictionPnL >= 0 ? "+" : ""}{fmt(totalPredictionPnL)}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </section>
