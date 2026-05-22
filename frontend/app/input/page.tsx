@@ -3,6 +3,16 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearAccessToken, getValidAccessToken } from "../lib/auth";
+import {
+  bandLabel,
+  bandLabelJa,
+  buildEvalArchive,
+  buildPredictionSummary,
+  type EvalStatsResponse,
+  type PredictedBand,
+  type RoundEval,
+  type RoundEvalArchive,
+} from "../lib/evals";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const READY_THRESHOLD = 18;
@@ -24,7 +34,6 @@ function predictedBandDotClass(band: PredictedBand): string {
 
 type Round = { id: number; multiplier: number; recorded_at: string };
 type AnalysisStatus = { total_rounds: number; ready: boolean; mlAvailable: boolean } | null;
-type PredictedBand = "blue" | "green" | "yellow" | "red";
 type CapturePreview = {
   captured_at: string;
   bar_image: string;
@@ -33,101 +42,12 @@ type CapturePreview = {
   values: number[];
   scale: number;
 };
-type RoundEval = {
-  predicted_band: PredictedBand;
-  actual_band: PredictedBand;
-  actual: number;
-  verdict: "hit" | "miss";
-  emoji: string;
-  label: string;
-  evaluated_at: string;
-};
-type RoundEvalArchive = Record<string, RoundEval>;
-type EvalStatsRow = {
-  predicted_band: PredictedBand;
-  actual_band: PredictedBand;
-  verdict: "hit" | "miss";
-  count: number;
-};
-type EvalRecentRow = {
-  round_id: number;
-  predicted_band: PredictedBand;
-  actual_band: PredictedBand;
-  actual_multiplier: number;
-  verdict: "hit" | "miss";
-  evaluated_at: string;
-};
-type EvalStatsResponse = {
-  by_band: EvalStatsRow[];
-  recent: EvalRecentRow[];
-};
-
-const SUMMARY_BANDS: PredictedBand[] = ["red", "yellow", "green", "blue"];
 
 function bandFromMultiplier(v: number): PredictedBand {
   if (v < 2.0) return "blue";
   if (v < 5.0) return "green";
   if (v < 10.0) return "yellow";
   return "red";
-}
-
-function bandLabel(band: PredictedBand): string {
-  if (band === "blue") return "Blue";
-  if (band === "green") return "Green";
-  if (band === "yellow") return "Yellow";
-  return "Red";
-}
-
-function bandLabelJa(band: PredictedBand): string {
-  if (band === "blue") return "青";
-  if (band === "green") return "緑";
-  if (band === "yellow") return "黄";
-  return "赤";
-}
-
-function isOverResult(predictedBand: PredictedBand, actualBand: PredictedBand): boolean {
-  if (predictedBand === "green") return actualBand === "yellow" || actualBand === "red";
-  if (predictedBand === "yellow") return actualBand === "red";
-  return false;
-}
-
-function buildPredictionSummary(rows: EvalStatsRow[]) {
-  return SUMMARY_BANDS.map((band) => {
-    const relevant = rows.filter((row) => row.predicted_band === band);
-    const predictedCount = relevant.reduce((sum, row) => sum + row.count, 0);
-    const hitCount = relevant
-      .filter((row) => row.verdict === "hit")
-      .reduce((sum, row) => sum + row.count, 0);
-    const overCount = band === "blue" || band === "red"
-      ? null
-      : relevant
-          .filter((row) => isOverResult(row.predicted_band, row.actual_band))
-          .reduce((sum, row) => sum + row.count, 0);
-
-    return {
-      band,
-      predictedCount,
-      hitCount,
-      overCount,
-      hitRate: predictedCount > 0 ? (hitCount / predictedCount) * 100 : null,
-    };
-  });
-}
-
-function buildEvalArchive(rows: EvalRecentRow[]): RoundEvalArchive {
-  const archive: RoundEvalArchive = {};
-  for (const row of rows) {
-    archive[String(row.round_id)] = {
-      predicted_band: row.predicted_band,
-      actual_band: row.actual_band,
-      actual: row.actual_multiplier,
-      verdict: row.verdict,
-      emoji: row.verdict === "hit" ? "✅" : "❌",
-      label: `予測:${bandLabel(row.predicted_band)} / 実績:${bandLabel(row.actual_band)}`,
-      evaluated_at: row.evaluated_at,
-    };
-  }
-  return archive;
 }
 
 function judgePrediction(actual: number, predictedBand: PredictedBand): RoundEval {
@@ -220,7 +140,7 @@ export default function InputPage() {
       if (!res.ok) return;
       const data = await res.json() as EvalStatsResponse;
       setEvalStats(data);
-      setEvalArchive(buildEvalArchive(data.recent));
+      setEvalArchive(buildEvalArchive(data.recent, { missEmoji: "❌", labelSeparator: " / " }));
     } catch {
       // best-effort
     }

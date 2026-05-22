@@ -1,6 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  bandLabelJa,
+  buildEvalArchive,
+  buildPredictionSummary,
+  type EvalStatsResponse,
+  type PredictedBand,
+  type RoundEvalArchive,
+} from "./lib/evals";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const POLL_INTERVAL = 10_000;
@@ -70,38 +78,6 @@ type AnalysisData = {
 
 type Params = { rsi_period: number; macd_fast: number; macd_slow: number; macd_signal: number };
 type Round = { id: number; multiplier: number; recorded_at: string };
-type PredictedBand = "blue" | "green" | "yellow" | "red";
-type EvalStatsRow = {
-  predicted_band: PredictedBand;
-  actual_band: PredictedBand;
-  verdict: "hit" | "miss";
-  count: number;
-};
-type EvalRecentRow = {
-  round_id: number;
-  predicted_band: PredictedBand;
-  actual_band: PredictedBand;
-  actual_multiplier: number;
-  verdict: "hit" | "miss";
-  evaluated_at: string;
-};
-type EvalStatsResponse = {
-  by_band: EvalStatsRow[];
-  recent: EvalRecentRow[];
-};
-type RoundEval = {
-  predicted_band: PredictedBand;
-  actual_band: PredictedBand;
-  predicted_line?: number;
-  actual: number;
-  verdict: "hit" | "miss";
-  emoji: string;
-  label: string;
-  evaluated_at: string;
-};
-type RoundEvalArchive = Record<string, RoundEval>;
-
-const SUMMARY_BANDS: PredictedBand[] = ["red", "yellow", "green", "blue"];
 
 const DEFAULT_PARAMS: Params = { rsi_period: 14, macd_fast: 12, macd_slow: 26, macd_signal: 9 };
 
@@ -389,65 +365,6 @@ function predictedBandDotClass(band: PredictedBand): string {
   return "bg-red-700";
 }
 
-function bandLabel(band: PredictedBand): string {
-  if (band === "blue") return "1x台";
-  if (band === "green") return "2x以上";
-  if (band === "yellow") return "5x以上";
-  return "10x以上";
-}
-
-function bandLabelJa(band: PredictedBand): string {
-  if (band === "blue") return "青";
-  if (band === "green") return "緑";
-  if (band === "yellow") return "黄";
-  return "赤";
-}
-
-function isOverResult(predictedBand: PredictedBand, actualBand: PredictedBand): boolean {
-  if (predictedBand === "green") return actualBand === "yellow" || actualBand === "red";
-  if (predictedBand === "yellow") return actualBand === "red";
-  return false;
-}
-
-function buildPredictionSummary(rows: EvalStatsRow[]) {
-  return SUMMARY_BANDS.map((band) => {
-    const relevant = rows.filter((row) => row.predicted_band === band);
-    const predictedCount = relevant.reduce((sum, row) => sum + row.count, 0);
-    const hitCount = relevant
-      .filter((row) => row.verdict === "hit")
-      .reduce((sum, row) => sum + row.count, 0);
-    const overCount = band === "blue" || band === "red"
-      ? null
-      : relevant
-          .filter((row) => isOverResult(row.predicted_band, row.actual_band))
-          .reduce((sum, row) => sum + row.count, 0);
-
-    return {
-      band,
-      predictedCount,
-      hitCount,
-      overCount,
-      hitRate: predictedCount > 0 ? (hitCount / predictedCount) * 100 : null,
-    };
-  });
-}
-
-function buildEvalArchive(rows: EvalRecentRow[]): RoundEvalArchive {
-  const archive: RoundEvalArchive = {};
-  for (const row of rows) {
-    archive[String(row.round_id)] = {
-      predicted_band: row.predicted_band,
-      actual_band: row.actual_band,
-      actual: row.actual_multiplier,
-      verdict: row.verdict,
-      emoji: row.verdict === "hit" ? "✅" : "●",
-      label: `予測:${bandLabel(row.predicted_band)} 実績:${bandLabel(row.actual_band)}`,
-      evaluated_at: row.evaluated_at,
-    };
-  }
-  return archive;
-}
-
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
@@ -463,6 +380,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<ChartTab>("prob");
   const [soundEnabled, setSoundEnabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const evalStatsRequestRef = useRef<Promise<void> | null>(null);
   const paramsRef = useRef<Params>(params);
   const prevEntryOkRef = useRef<boolean>(false);
 
@@ -506,18 +424,27 @@ export default function Home() {
     }
   }, []);
 
+  const refreshEvalStats = useCallback(() => {
+    if (evalStatsRequestRef.current) return evalStatsRequestRef.current;
+    const request = fetchEvalStats().finally(() => {
+      evalStatsRequestRef.current = null;
+    });
+    evalStatsRequestRef.current = request;
+    return request;
+  }, [fetchEvalStats]);
+
   useEffect(() => {
     fetchData(params);
     fetchRounds();
-    fetchEvalStats();
+    refreshEvalStats();
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       fetchData(params);
       fetchRounds();
-      fetchEvalStats();
+      refreshEvalStats();
     }, POLL_INTERVAL);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [params, fetchData, fetchRounds, fetchEvalStats]);
+  }, [params, fetchData, fetchRounds, refreshEvalStats]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -531,7 +458,7 @@ export default function Home() {
       ws.onmessage = () => {
         fetchData(paramsRef.current);
         fetchRounds();
-        fetchEvalStats();
+        refreshEvalStats();
       };
       ws.onclose = () => {
         if (!destroyed) {
@@ -546,7 +473,7 @@ export default function Home() {
     ch.onmessage = () => {
       fetchData(paramsRef.current);
       fetchRounds();
-      fetchEvalStats();
+      refreshEvalStats();
     };
 
     return () => {
@@ -555,7 +482,7 @@ export default function Home() {
       ws?.close();
       ch.close();
     };
-  }, [fetchData, fetchRounds, fetchEvalStats]);
+  }, [fetchData, fetchRounds, refreshEvalStats]);
 
   const applySettings = () => {
     setParams(draft);

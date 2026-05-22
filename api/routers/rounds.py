@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/rounds", tags=["rounds"])
 
 READY_THRESHOLD = 18
 MAX_LIMIT = 72
-MAX_POST_VALUES = 1000
+MAX_POST_VALUES = 200
 
 MULTIPLIER_MIN = 1.01
 MULTIPLIER_MAX = 501.00
