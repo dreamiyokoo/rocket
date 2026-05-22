@@ -6,6 +6,7 @@ import { clearAccessToken, getValidAccessToken } from "../lib/auth";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const READY_THRESHOLD = 18;
+const PREVIEW_POLL_INTERVAL = 3_000;
 const EVAL_ARCHIVE_KEY = "round_eval_archive_v3";
 const EVAL_ARCHIVE_UPDATED_AT_KEY = "round_eval_archive_updated_at";
 const EVAL_ARCHIVE_MAX = 2000;
@@ -27,6 +28,14 @@ function predictedBandDotClass(band: PredictedBand): string {
 type Round = { id: number; multiplier: number; recorded_at: string };
 type AnalysisStatus = { total_rounds: number; ready: boolean; mlAvailable: boolean } | null;
 type PredictedBand = "blue" | "green" | "yellow" | "red";
+type CapturePreview = {
+  captured_at: string;
+  bar_image: string;
+  mask_image: string;
+  raw_text: string;
+  values: number[];
+  scale: number;
+};
 type RoundEval = {
   predicted_band: PredictedBand;
   actual_band: PredictedBand;
@@ -124,6 +133,7 @@ export default function InputPage() {
   const [resetting, setResetting] = useState(false);
   const [status, setStatus] = useState<AnalysisStatus>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
+  const [preview, setPreview] = useState<CapturePreview | null>(null);
   const [evalArchive, setEvalArchive] = useState<RoundEvalArchive>({});
   const broadcastRef = useRef<BroadcastChannel | null>(null);
 
@@ -175,6 +185,31 @@ export default function InputPage() {
       // best-effort
     }
   }, []);
+
+  const fetchPreview = useCallback(async () => {
+    const token = getValidAccessToken();
+    if (!token) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/v1/capture/preview`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      if (res.status === 404) {
+        setPreview(null);
+        return;
+      }
+      if (!res.ok) return;
+      const data = await res.json() as CapturePreview;
+      setPreview(data);
+    } catch {
+      // best-effort
+    }
+  }, [handleUnauthorized]);
 
   const fetchCurrentPredictionBand = useCallback(async (): Promise<PredictedBand | null> => {
     try {
@@ -228,7 +263,20 @@ export default function InputPage() {
     setCheckingAuth(false);
     fetchStatus();
     fetchRounds();
-  }, [router, fetchStatus, fetchRounds]);
+    fetchPreview();
+  }, [router, fetchStatus, fetchRounds, fetchPreview]);
+
+  useEffect(() => {
+    if (checkingAuth) return;
+
+    const timer = setInterval(() => {
+      fetchPreview();
+    }, PREVIEW_POLL_INTERVAL);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [checkingAuth, fetchPreview]);
 
   const parseValues = (): { values: number[] } | { error: string } => {
     const lines = text.split("\n").map((s) => s.trim()).filter(Boolean);
@@ -394,6 +442,7 @@ export default function InputPage() {
   }
 
   const remaining = status ? Math.max(0, READY_THRESHOLD - status.total_rounds) : null;
+  const previewUpdatedAt = preview ? new Date(preview.captured_at) : null;
 
   return (
     <main className="min-h-screen p-6 max-w-xl mx-auto space-y-6">
@@ -421,6 +470,70 @@ export default function InputPage() {
           </p>
         </div>
       )}
+
+      <section className="bg-gray-900 rounded-xl p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-white">OCR プレビュー</h2>
+            <p className="text-xs text-gray-400">
+              最新キャプチャのバー画像と OCR マスクを 3 秒ごとに更新します。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { void fetchPreview(); }}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-gray-800 text-gray-200 hover:bg-gray-700 transition-colors"
+          >
+            更新
+          </button>
+        </div>
+
+        {preview ? (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400">キャプチャバー</p>
+                <img
+                  src={preview.bar_image}
+                  alt="最新の OCR キャプチャバー"
+                  className="w-full rounded-lg border border-gray-800 bg-black"
+                />
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400">OCR マスク</p>
+                <img
+                  src={preview.mask_image}
+                  alt="OCR 用の白文字マスク"
+                  className="w-full rounded-lg border border-gray-800 bg-black"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-lg bg-gray-950 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500">抽出値</p>
+                <p className="mt-1 text-sm font-mono text-green-300">
+                  {preview.values.length > 0 ? preview.values.join(", ") : "なし"}
+                </p>
+              </div>
+              <div className="rounded-lg bg-gray-950 px-3 py-2 sm:col-span-2">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500">OCR Raw</p>
+                <p className="mt-1 text-sm font-mono text-gray-200 break-all">
+                  {preview.raw_text || "(empty)"}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              更新時刻: {previewUpdatedAt?.toLocaleString("ja-JP") ?? "-"} / scale {preview.scale}x
+            </p>
+          </>
+        ) : (
+          <div className="rounded-lg border border-dashed border-gray-700 px-4 py-6 text-sm text-gray-400 text-center">
+            まだ OCR プレビューはありません。capture が新しいスクリーンショットを送るとここに表示されます。
+          </div>
+        )}
+      </section>
 
       {/* Input form */}
       <form onSubmit={handleSubmit} className="space-y-4">

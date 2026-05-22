@@ -9,11 +9,13 @@ ocr.py — ADB スクリーンショット → OCR → /api/v1/rounds 送信
 """
 
 import argparse
+import base64
 import os
 import re
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import cv2
@@ -21,12 +23,20 @@ import httpx
 import numpy as np
 import pytesseract
 import yaml
+from pytesseract import Output
 
 # ────────────────────────────────────────────────
 # 設定読み込み
 # ────────────────────────────────────────────────
 
 CONFIG_PATH = Path(__file__).parent / "config.yml"
+
+COLOR_RANGE_MAP = {
+    "blue": (1.01, 2.00),
+    "green": (2.01, 5.00),
+    "yellow": (5.01, 10.00),
+    "red": (10.01, 501.00),
+}
 
 
 def load_config() -> dict:
@@ -53,6 +63,16 @@ def adb_cmd(device: str, *args: str) -> list[str]:
     return base + list(args)
 
 
+def recover_adb_connection(device: str) -> None:
+    """ADB 接続が不安定なときの軽量リカバリ。"""
+    try:
+        subprocess.run(adb_cmd(device, "reconnect"), capture_output=True, timeout=8)
+        subprocess.run(adb_cmd(device, "wait-for-device"), capture_output=True, timeout=15)
+        print("[INFO] ADB 接続をリカバリしました")
+    except subprocess.TimeoutExpired:
+        print("[WARN] ADB リカバリがタイムアウトしました", file=sys.stderr)
+
+
 def take_screenshot(device: str) -> np.ndarray | None:
     """adb screencap で画像を取得して numpy 配列で返す"""
     try:
@@ -62,7 +82,14 @@ def take_screenshot(device: str) -> np.ndarray | None:
             timeout=10,
         )
         if result.returncode != 0:
-            print(f"[WARN] screencap failed: {result.stderr.decode()}", file=sys.stderr)
+            stderr = result.stderr.decode(errors="ignore")
+            print(f"[WARN] screencap failed: {stderr}", file=sys.stderr)
+            if (
+                "no devices/emulators found" in stderr
+                or "cannot connect to daemon" in stderr
+                or "Connection refused" in stderr
+            ):
+                recover_adb_connection(device)
             return None
         arr = np.frombuffer(result.stdout, dtype=np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -76,7 +103,164 @@ def take_screenshot(device: str) -> np.ndarray | None:
 # OCR
 # ────────────────────────────────────────────────
 
-def ocr_history_bar(img: np.ndarray, crop: list[int], scale: int, debug: bool = False) -> list[float]:
+def encode_image_data_url(img: np.ndarray, extension: str, mime_type: str, params: list[int] | None = None) -> str:
+    options = params if params is not None else []
+    ok, encoded = cv2.imencode(extension, img, options)
+    if not ok:
+        raise ValueError(f"failed to encode image as {extension}")
+    return f"data:{mime_type};base64,{base64.b64encode(encoded.tobytes()).decode('ascii')}"
+
+
+def detect_pill_regions(white_mask: np.ndarray) -> list[tuple[int, int, int, int]]:
+    # 数字と下線を横方向にまとめて、各ピルの文字領域を1塊にする
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (41, 25))
+    mask = cv2.dilate(white_mask, kernel, iterations=1)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    height, width = white_mask.shape[:2]
+    min_w = max(70, width // 20)
+    min_h = max(50, height // 4)
+    regions: list[tuple[int, int, int, int]] = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if w < min_w or h < min_h:
+            continue
+        if y + h < height // 4:
+            continue
+        pad_x = min(70, x)
+        pad_y = min(26, y)
+        x0 = max(0, x - pad_x)
+        y0 = max(0, y - pad_y)
+        x1 = min(width, x + w + pad_x)
+        y1 = min(height, y + h + pad_y)
+        regions.append((x0, y0, x1, y1))
+    regions.sort(key=lambda region: region[0])
+    return regions[:4]
+
+
+def classify_pill_color(pill_img: np.ndarray, pill_mask: np.ndarray) -> str:
+    hsv = cv2.cvtColor(pill_img, cv2.COLOR_BGR2HSV)
+    bg_mask = (hsv[:, :, 1] > 45) & (hsv[:, :, 2] > 40) & (pill_mask == 0)
+    pixels = hsv[bg_mask]
+    if len(pixels) == 0:
+        pixels = hsv.reshape(-1, 3)
+
+    hue = float(np.median(pixels[:, 0]))
+    if 35 <= hue < 85:
+        return "green"
+    if 15 <= hue < 35:
+        return "yellow"
+    if hue < 10 or hue >= 170:
+        return "red"
+    return "blue"
+
+
+def parse_ocr_number(text: str) -> float | None:
+    normalized = text.replace(" ", "").replace("\n", "")
+    match = re.search(r"\d+\.\d+|\b\d{3,}\b", normalized)
+    if not match:
+        return None
+    value = round(float(match.group(0)), 2)
+    if 1.01 <= value <= 501.00:
+        return value
+    return None
+
+
+def ocr_candidates_for_pill(pill_img: np.ndarray, pill_mask: np.ndarray) -> list[dict]:
+    gray = cv2.cvtColor(pill_img, cv2.COLOR_BGR2GRAY)
+    _, gray_threshold = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+    variants = [
+        ("base", pill_mask),
+        (
+            "close",
+            cv2.morphologyEx(
+                pill_mask,
+                cv2.MORPH_CLOSE,
+                cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+            ),
+        ),
+        (
+            "dilate",
+            cv2.dilate(
+                pill_mask,
+                cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)),
+                iterations=1,
+            ),
+        ),
+        ("gray", gray),
+        ("gray-threshold", gray_threshold),
+    ]
+
+    candidates: list[dict] = []
+    for variant_name, variant in variants:
+        data = pytesseract.image_to_data(
+            variant,
+            config="--oem 1 --psm 7 -c tessedit_char_whitelist=0123456789.",
+            output_type=Output.DICT,
+        )
+        tokens = [text.strip() for text in data["text"] if text.strip()]
+        confs = [float(conf) for conf in data["conf"] if conf not in {"-1", -1}]
+        raw_text = "".join(tokens)
+        value = parse_ocr_number(raw_text)
+        if value is None:
+            continue
+        candidates.append(
+            {
+                "variant": variant_name,
+                "raw_text": raw_text,
+                "value": value,
+                "confidence": float(np.mean(confs)) if confs else 0.0,
+            }
+        )
+    return candidates
+
+
+def is_value_consistent_with_color(value: float, pill_color: str) -> bool:
+    lo, hi = COLOR_RANGE_MAP[pill_color]
+    return lo <= value <= hi
+
+
+def correct_value_with_color(value: float, pill_color: str) -> float | None:
+    if is_value_consistent_with_color(value, pill_color):
+        return value
+
+    integer_part = int(value)
+    fractional_part = round(value - integer_part, 2)
+
+    # 青帯は 1.xx か 2.00 に限られるため、整数部だけの誤読は保守的に補正できる。
+    if pill_color == "blue":
+        corrected = round(1 + fractional_part, 2)
+        if is_value_consistent_with_color(corrected, pill_color):
+            return corrected
+
+    return None
+
+
+def choose_pill_value(pill_color: str, candidates: list[dict]) -> tuple[float | None, str]:
+    if not candidates:
+        return None, ""
+
+    ranked = []
+    for candidate in candidates:
+        score = candidate["confidence"]
+        if is_value_consistent_with_color(candidate["value"], pill_color):
+            score += 100
+        ranked.append((score, candidate))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+
+    best = ranked[0][1]
+    corrected = correct_value_with_color(best["value"], pill_color)
+    if corrected is not None and corrected != best["value"]:
+        return corrected, f"{best['raw_text']} -> {corrected:.2f} ({pill_color})"
+    return best["value"], best["raw_text"]
+
+
+def extract_history_bar_preview(
+    img: np.ndarray,
+    crop: list[int],
+    scale: int,
+    debug: bool = False,
+) -> dict:
     """
     履歴バー（最新4件のピル）から倍率リストを抽出する。
     crop = [y_start, y_end, x_start, x_end]
@@ -100,21 +284,45 @@ def ocr_history_bar(img: np.ndarray, crop: list[int], scale: int, debug: bool = 
         cv2.imwrite("/tmp/ocr_bar.png", bar)
         cv2.imwrite("/tmp/ocr_thresh.png", white_mask)
 
-    # PSM 11: スパーステキスト（ピル間の空白に強い）
-    text = pytesseract.image_to_string(white_mask, config="--oem 1 --psm 11 -c tessedit_char_whitelist=0123456789.")
-    if debug:
-        print(f"[DEBUG] OCR raw text: {repr(text)}")
-    # 小数形式 + 3桁以上の整数（501 等、末尾の .00 が見切れて読まれる場合のフォールバック）
-    values = re.findall(r"\d+\.\d+|\b\d{3,}\b", text)
-    # 小数点以下3桁以上は誤認識 → 小数2桁に丸める
+    pill_regions = detect_pill_regions(white_mask)
     result = []
-    for v in values:
-        f = float(v)
-        # 倍率の有効範囲チェック (1.01〜501.00)
-        f = round(f, 2)
-        if 1.01 <= f <= 501.00:
-            result.append(f)
-    return result
+    raw_lines: list[str] = []
+    colors: list[str] = []
+    for x0, y0, x1, y1 in pill_regions:
+        pill_img = large[y0:y1, x0:x1]
+        pill_mask = white_mask[y0:y1, x0:x1]
+        pill_color = classify_pill_color(pill_img, pill_mask)
+        candidates = ocr_candidates_for_pill(pill_img, pill_mask)
+        value, raw_text = choose_pill_value(pill_color, candidates)
+        if value is None:
+            continue
+        result.append(value)
+        raw_lines.append(raw_text or f"{value:.2f}")
+        colors.append(pill_color)
+
+    if debug:
+        print(f"[DEBUG] OCR raw text: {repr(raw_lines)}")
+        print(f"[DEBUG] pill colors: {colors}")
+
+    text = "\n".join(raw_lines)
+    return {
+        "values": result,
+        "raw_text": text.strip(),
+        "bar_image": encode_image_data_url(bar, ".jpg", "image/jpeg", [int(cv2.IMWRITE_JPEG_QUALITY), 85]),
+        "mask_image": encode_image_data_url(white_mask, ".png", "image/png"),
+        "scale": scale,
+        "pill_colors": colors,
+    }
+
+
+def post_capture_preview(client: httpx.Client, base_url: str, token: str, preview: dict) -> None:
+    resp = client.post(
+        f"{base_url}/api/v1/capture/preview",
+        json=preview,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    resp.raise_for_status()
 
 
 # ────────────────────────────────────────────────
@@ -204,7 +412,28 @@ def run(cfg: dict, once: bool = False, debug: bool = False) -> None:
                 time.sleep(interval)
                 continue
 
-            values = ocr_history_bar(img, crop, scale, debug=debug)
+            preview = extract_history_bar_preview(img, crop, scale, debug=debug)
+            preview_payload = {
+                **preview,
+                "captured_at": datetime.now(UTC).isoformat(),
+            }
+
+            try:
+                post_capture_preview(client, base_url, token, preview_payload)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    try:
+                        token = login(client, base_url, username, password)
+                        token_refreshed_at = time.time()
+                        post_capture_preview(client, base_url, token, preview_payload)
+                    except (httpx.RequestError, httpx.HTTPStatusError) as preview_error:
+                        print(f"[WARN] プレビュー送信失敗: {preview_error}", file=sys.stderr)
+                else:
+                    print(f"[WARN] プレビュー送信失敗: {e.response.status_code} {e.response.text}", file=sys.stderr)
+            except httpx.RequestError as e:
+                print(f"[WARN] プレビュー送信失敗: {e}", file=sys.stderr)
+
+            values = preview["values"]
 
             if not values:
                 if debug:
