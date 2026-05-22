@@ -261,3 +261,38 @@ EOF
 # 別PCへ転送（例）
 scp yokoo@ms02:~/IdeaProjects/rocket/docs/rounds_export_ml.csv ./
 ```
+
+---
+
+## 修正履歴
+
+### 2026-05-20: Trailing Streak 計算ロジック復帰
+
+**問題**
+- 2026-05-19 の CSV データ更新後、ML 予測がほぼ全て青（Low）に収束する症状が発生
+- 推論時に生成される `low_streak`, `very_low_streak` 特徴量が、学習時の期待値と乖離していたことが根本原因
+
+**原因の特定**
+- Copilot の自動修正（コミット 5b7b995）により、`low_streak` と `very_low_streak` の計算ロジックが誤って変更されていた
+- **修正前（正）**: ウィンドウの末尾から**連続で条件を満たす値をカウント**（trailing streak）
+  ```python
+  low_streak = 0
+  for x in reversed(window):
+      if x < 1.5:
+          low_streak += 1
+      else:
+          break  # ← 途中で止める
+  ```
+- **修正後（誤）**: ウィンドウ**全体で条件を満たす値の個数をカウント**（simple count）
+  ```python
+  low_streak = sum(1 for x in window if x < 1.5)  # ← 全部カウント
+  ```
+
+**修正内容**
+- `api/ml/features.py` の `make_binary_feature_vector()` 内の `low_streak`, `very_low_streak` を元の trailing streak ロジックに復帰
+- コミット: `8b334ae` (feature/prediction-display-basic-auth)
+
+**学習**
+- **ML の train-inference パリティは極めて重要**。特徴量計算の変更は、学習済みモデルをそのまま使う場合、必ず全データで再学習が必要
+- ウィンドウ内の時系列的な「最近の傾向」を反映させるには、単純カウントではなく trailing streak（末尾からの連続性）が必要な場合が多い
+- 今後の修正時には、特徴量計算の変更があれば必ず精度検証（テストデータでの推論精度確認）を行うこと
