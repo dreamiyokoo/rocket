@@ -228,6 +228,134 @@ class TestGetRounds:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/v1/rounds/probability-trends
+# ---------------------------------------------------------------------------
+
+
+class TestGetProbabilityTrends:
+    def _make_bucket_row(
+        self,
+        bucket_iso: str,
+        total: int,
+        prob_1_2x: float,
+        prob_2_0x: float,
+        prob_blue: float,
+        prob_green: float,
+        prob_yellow: float,
+        prob_red: float,
+    ) -> MagicMock:
+        row = MagicMock()
+        row.bucket = MagicMock()
+        row.bucket.isoformat.return_value = bucket_iso
+        row.total = total
+        row.prob_1_2x = prob_1_2x
+        row.prob_2_0x = prob_2_0x
+        row.prob_blue = prob_blue
+        row.prob_green = prob_green
+        row.prob_yellow = prob_yellow
+        row.prob_red = prob_red
+        return row
+
+    def _make_hourly_stats_row(
+        self,
+        hour: int,
+        total: int,
+        prob_1_2x: float,
+        prob_2_0x: float,
+        prob_green: float,
+        prob_yellow: float,
+        prob_red: float,
+    ) -> MagicMock:
+        row = MagicMock()
+        row.hour = hour
+        row.total = total
+        row.prob_1_2x = prob_1_2x
+        row.prob_2_0x = prob_2_0x
+        row.prob_green = prob_green
+        row.prob_yellow = prob_yellow
+        row.prob_red = prob_red
+        return row
+
+    def _rows_result(self, rows: list[MagicMock]) -> MagicMock:
+        result = MagicMock()
+        result.__iter__ = lambda self: iter(rows)
+        return result
+
+    def test_get_probability_trends_success_with_24h_fill(self):
+        hourly_rows = [
+            self._make_bucket_row(
+                "2026-01-01T10:00:00+00:00",
+                10,
+                0.4,
+                0.8,
+                0.8,
+                0.1,
+                0.05,
+                0.05,
+            )
+        ]
+        daily_rows = [
+            self._make_bucket_row(
+                "2026-01-01T00:00:00+00:00",
+                20,
+                0.5,
+                0.9,
+                0.9,
+                0.05,
+                0.03,
+                0.02,
+            )
+        ]
+        hourly_stats_rows = [
+            self._make_hourly_stats_row(1, 5, 0.2, 0.5, 0.2, 0.2, 0.1),
+            self._make_hourly_stats_row(23, 2, 0.1, 0.3, 0.3, 0.2, 0.2),
+        ]
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(
+            side_effect=[
+                self._rows_result(hourly_rows),
+                self._rows_result(daily_rows),
+                self._rows_result(hourly_stats_rows),
+            ]
+        )
+        app.dependency_overrides[get_db] = lambda: mock_db
+
+        response = TestClient(app).get("/api/v1/rounds/probability-trends?days=14")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["days"] == 14
+        assert data["timezone"] == "UTC"
+        assert data["hourly_timezone"] == "UTC"
+        assert data["daily_timezone"] == "UTC"
+        assert data["hourly_stats_timezone"] == "Asia/Tokyo"
+
+        assert len(data["hourly"]) == 1
+        assert len(data["daily"]) == 1
+        assert len(data["hourly_stats"]) == 24
+        assert data["hourly_stats"][0] == {
+            "hour": 0,
+            "total": 0,
+            "prob_1_2x": 0.0,
+            "prob_2_0x": 0.0,
+            "prob_green": 0.0,
+            "prob_yellow": 0.0,
+            "prob_red": 0.0,
+        }
+        assert data["hourly_stats"][1]["total"] == 5
+        assert data["hourly_stats"][23]["total"] == 2
+
+        assert mock_db.execute.await_count == 3
+        for call in mock_db.execute.await_args_list:
+            assert call.args[1] == {"days": 14}
+
+    def test_get_probability_trends_days_validation(self):
+        response = TestClient(app).get("/api/v1/rounds/probability-trends?days=0")
+        assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # DELETE /api/v1/rounds
 # ---------------------------------------------------------------------------
 

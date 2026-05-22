@@ -158,6 +158,143 @@ async def get_rounds(
     return {"rounds": rounds, "total": total}
 
 
+@router.get("/probability-trends")
+async def get_probability_trends(
+    days: int = Query(default=14, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    params = {"days": days}
+
+    hourly_rows = await db.execute(
+        text(
+            """
+            SELECT
+                date_trunc('hour', recorded_at) AS bucket,
+                COUNT(*) AS total,
+                AVG(CASE WHEN multiplier <= 1.2 THEN 1.0 ELSE 0.0 END) AS prob_1_2x,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_2_0x,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_blue,
+                AVG(CASE WHEN multiplier > 2.0 AND multiplier <= 5.0 THEN 1.0 ELSE 0.0 END) AS prob_green,
+                AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
+                AVG(CASE WHEN multiplier > 10.0 THEN 1.0 ELSE 0.0 END) AS prob_red
+            FROM rounds
+            WHERE recorded_at >= NOW() - (:days * INTERVAL '1 day')
+            GROUP BY 1
+            ORDER BY 1 ASC
+            """
+        ),
+        params,
+    )
+
+    daily_rows = await db.execute(
+        text(
+            """
+            SELECT
+                date_trunc('day', recorded_at) AS bucket,
+                COUNT(*) AS total,
+                AVG(CASE WHEN multiplier <= 1.2 THEN 1.0 ELSE 0.0 END) AS prob_1_2x,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_2_0x,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_blue,
+                AVG(CASE WHEN multiplier > 2.0 AND multiplier <= 5.0 THEN 1.0 ELSE 0.0 END) AS prob_green,
+                AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
+                AVG(CASE WHEN multiplier > 10.0 THEN 1.0 ELSE 0.0 END) AS prob_red
+            FROM rounds
+            WHERE recorded_at >= NOW() - (:days * INTERVAL '1 day')
+            GROUP BY 1
+            ORDER BY 1 ASC
+            """
+        ),
+        params,
+    )
+
+    hourly_stats_rows = await db.execute(
+        text(
+            """
+            SELECT
+                EXTRACT(HOUR FROM recorded_at AT TIME ZONE 'Asia/Tokyo')::int AS hour,
+                COUNT(*) AS total,
+                AVG(CASE WHEN multiplier <= 1.2 THEN 1.0 ELSE 0.0 END) AS prob_1_2x,
+                AVG(CASE WHEN multiplier <= 2.0 THEN 1.0 ELSE 0.0 END) AS prob_2_0x,
+                AVG(CASE WHEN multiplier > 2.0 AND multiplier <= 5.0 THEN 1.0 ELSE 0.0 END) AS prob_green,
+                AVG(CASE WHEN multiplier > 5.0 AND multiplier <= 10.0 THEN 1.0 ELSE 0.0 END) AS prob_yellow,
+                AVG(CASE WHEN multiplier > 10.0 THEN 1.0 ELSE 0.0 END) AS prob_red
+            FROM rounds
+            WHERE recorded_at >= NOW() - (:days * INTERVAL '1 day')
+            GROUP BY 1
+            ORDER BY 1 ASC
+            """
+        ),
+        params,
+    )
+
+    hourly = [
+        {
+            "bucket": r.bucket.isoformat(),
+            "total": int(r.total),
+            "prob_1_2x": float(r.prob_1_2x or 0.0),
+            "prob_2_0x": float(r.prob_2_0x or 0.0),
+            "prob_blue": float(r.prob_blue or 0.0),
+            "prob_green": float(r.prob_green or 0.0),
+            "prob_yellow": float(r.prob_yellow or 0.0),
+            "prob_red": float(r.prob_red or 0.0),
+        }
+        for r in hourly_rows
+    ]
+
+    daily = [
+        {
+            "bucket": r.bucket.isoformat(),
+            "total": int(r.total),
+            "prob_1_2x": float(r.prob_1_2x or 0.0),
+            "prob_2_0x": float(r.prob_2_0x or 0.0),
+            "prob_blue": float(r.prob_blue or 0.0),
+            "prob_green": float(r.prob_green or 0.0),
+            "prob_yellow": float(r.prob_yellow or 0.0),
+            "prob_red": float(r.prob_red or 0.0),
+        }
+        for r in daily_rows
+    ]
+
+    hourly_stats_map = {
+        int(r.hour): {
+            "hour": int(r.hour),
+            "total": int(r.total),
+            "prob_1_2x": float(r.prob_1_2x or 0.0),
+            "prob_2_0x": float(r.prob_2_0x or 0.0),
+            "prob_green": float(r.prob_green or 0.0),
+            "prob_yellow": float(r.prob_yellow or 0.0),
+            "prob_red": float(r.prob_red or 0.0),
+        }
+        for r in hourly_stats_rows
+    }
+    hourly_stats = [
+        hourly_stats_map.get(
+            h,
+            {
+                "hour": h,
+                "total": 0,
+                "prob_1_2x": 0.0,
+                "prob_2_0x": 0.0,
+                "prob_green": 0.0,
+                "prob_yellow": 0.0,
+                "prob_red": 0.0,
+            },
+        )
+        for h in range(24)
+    ]
+
+    return {
+        "timezone": "UTC",
+        "hourly_timezone": "UTC",
+        "daily_timezone": "UTC",
+        "hourly_stats_timezone": "Asia/Tokyo",
+        "days": days,
+        "hourly": hourly,
+        "daily": daily,
+        "hourly_stats": hourly_stats,
+    }
+
+
 @router.delete("")
 async def delete_rounds(
     db: AsyncSession = Depends(get_db),
