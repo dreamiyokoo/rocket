@@ -231,7 +231,7 @@ def main():
         csv_path = os.path.join(os.path.dirname(__file__), "..", csv_path)
 
     print(f"データ読み込み: {csv_path}")
-    df = pd.read_csv(csv_path, names=["id", "multiplier", "recorded_at"], parse_dates=["recorded_at"])
+    df = pd.read_csv(csv_path, names=["id", "multiplier", "recorded_at"], parse_dates=["recorded_at"], skiprows=1)
     df = df.sort_values("recorded_at").reset_index(drop=True)
     print(f"件数: {len(df)}  期間: {df['recorded_at'].min()} 〜 {df['recorded_at'].max()}")
 
