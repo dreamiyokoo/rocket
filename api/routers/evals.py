@@ -125,3 +125,16 @@ async def get_eval_stats(
         "by_band": stats,
         "recent": recent,
     }
+
+
+@router.delete("", status_code=200)
+async def delete_evals(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    """prediction_evals のみをリセットする（rounds は保持）。"""
+    count_row = await db.execute(text("SELECT COUNT(*) FROM prediction_evals"))
+    deleted = count_row.scalar()
+    await db.execute(text("TRUNCATE prediction_evals"))
+    await db.commit()
+    return {"deleted": deleted}
