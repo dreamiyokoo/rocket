@@ -379,9 +379,9 @@ function NumInput({ label, value, min, max, onChange }: {
 }
 
 function multiplierBadgeClass(v: number): string {
-  if (v >= 10) return "bg-red-700 text-white";
-  if (v >= 5)  return "bg-yellow-500 text-black";
-  if (v >= 2)  return "bg-green-600 text-white";
+  if (v > 10) return "bg-red-700 text-white";
+  if (v > 5)  return "bg-yellow-500 text-black";
+  if (v > 2)  return "bg-green-600 text-white";
   return "bg-blue-600 text-white";
 }
 

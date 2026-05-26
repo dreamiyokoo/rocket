@@ -19,9 +19,9 @@ const READY_THRESHOLD = 18;
 const PREVIEW_POLL_INTERVAL = 3_000;
 
 function multiplierBadgeClass(v: number): string {
-  if (v >= 10) return "bg-red-700 text-white";
-  if (v >= 5)  return "bg-yellow-500 text-black";
-  if (v >= 2)  return "bg-green-600 text-white";
+  if (v > 10) return "bg-red-700 text-white";
+  if (v > 5)  return "bg-yellow-500 text-black";
+  if (v > 2)  return "bg-green-600 text-white";
   return "bg-blue-600 text-white";
 }
 
@@ -44,10 +44,10 @@ type CapturePreview = {
 };
 
 function bandFromMultiplier(v: number): PredictedBand {
-  if (v < 2.0) return "blue";
-  if (v < 5.0) return "green";
-  if (v < 10.0) return "yellow";
-  return "red";
+  if (v > 10.0) return "red";
+  if (v > 5.0) return "yellow";
+  if (v > 2.0) return "green";
+  return "blue";
 }
 
 function judgePrediction(actual: number, predictedBand: PredictedBand): RoundEval {
@@ -82,6 +82,7 @@ export default function InputPage() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [resettingEvals, setResettingEvals] = useState(false);
   const [status, setStatus] = useState<AnalysisStatus>(null);
   const [rounds, setRounds] = useState<Round[]>([]);
   const [preview, setPreview] = useState<CapturePreview | null>(null);
@@ -289,6 +290,37 @@ export default function InputPage() {
     }
   };
 
+  const handleResetPredictionSimulation = async () => {
+    if (!confirm("予測収支シミュレーションの履歴（予測評価）を削除します。よろしいですか？")) return;
+
+    const token = getValidAccessToken();
+    if (!token) { router.replace("/login"); return; }
+
+    setResettingEvals(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/evals`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        if (res.status === 401) {
+          handleUnauthorized();
+          return;
+        }
+        showToast("予測シミュレーションのリセットに失敗しました。", "error");
+        return;
+      }
+      showToast("予測シミュレーションをリセットしました。", "success");
+      setEvalArchive({});
+      setEvalStats({ by_band: [], recent: [] });
+      broadcastRef.current?.postMessage("update");
+    } catch {
+      showToast("予測シミュレーションのリセットに失敗しました。", "error");
+    } finally {
+      setResettingEvals(false);
+    }
+  };
+
   const handleLogout = async () => {
     const token = getValidAccessToken();
     if (token) {
@@ -437,7 +469,7 @@ export default function InputPage() {
         <div className="flex gap-3">
           <button
             type="submit"
-            disabled={submitting || resetting}
+            disabled={submitting || resetting || resettingEvals}
             className="flex-1 py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
           >
             {submitting ? "送信中..." : "送信"}
@@ -446,12 +478,21 @@ export default function InputPage() {
           <button
             type="button"
             onClick={handleReset}
-            disabled={submitting || resetting}
+            disabled={submitting || resetting || resettingEvals}
             className="py-2 px-4 bg-red-700 hover:bg-red-600 disabled:bg-red-900 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
           >
             {resetting ? "削除中..." : "リセット"}
           </button>
         </div>
+
+        <button
+          type="button"
+          onClick={handleResetPredictionSimulation}
+          disabled={submitting || resetting || resettingEvals}
+          className="w-full py-2 px-4 bg-amber-700 hover:bg-amber-600 disabled:bg-amber-900 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
+        >
+          {resettingEvals ? "予測履歴を削除中..." : "予測シミュレーションをリセット"}
+        </button>
       </form>
 
       {/* History */}
