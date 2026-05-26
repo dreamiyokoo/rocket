@@ -9,7 +9,7 @@ from core.database import get_db
 from core.redis import get_redis
 from deps import get_current_user
 from ml.features import WINDOW
-from ml.predictor import decide_band, predict
+from ml.evaluation import build_eval_payload
 from routers.analysis import CACHE_KEY as ANALYSIS_CACHE_KEY
 
 router = APIRouter(prefix="/api/v1/rounds", tags=["rounds"])
@@ -20,23 +20,6 @@ MAX_POST_VALUES = 200
 
 MULTIPLIER_MIN = 1.01
 MULTIPLIER_MAX = 501.00
-
-
-def _band_from_multiplier(value: float) -> str:
-    if value > 10.0:
-        return "red"
-    if value > 5.0:
-        return "yellow"
-    if value > 2.0:
-        return "green"
-    return "blue"
-
-
-def _predicted_band(history: list[float]) -> str | None:
-    prediction = predict(history)
-    if not prediction.available:
-        return None
-    return decide_band(prediction)
 
 
 class RoundsPostRequest(BaseModel):
@@ -67,7 +50,7 @@ async def post_rounds(
     _: dict = Depends(get_current_user),
 ):
     recent_rows = await db.execute(
-        text("SELECT multiplier FROM rounds ORDER BY recorded_at DESC LIMIT :limit"),
+        text("SELECT multiplier FROM rounds ORDER BY recorded_at DESC, id DESC LIMIT :limit"),
         {"limit": WINDOW},
     )
     history = [float(row.multiplier) for row in recent_rows]
@@ -75,7 +58,6 @@ async def post_rounds(
 
     inserted_rounds = []
     for value in body.values:
-        predicted_band = _predicted_band(history)
         inserted_row = await db.execute(
             text("INSERT INTO rounds (multiplier) VALUES (:value) RETURNING id, multiplier, recorded_at"),
             {"value": value},
@@ -89,10 +71,12 @@ async def post_rounds(
             }
         )
 
-        if predicted_band is not None:
-            actual_multiplier = float(row.multiplier)
-            actual_band = _band_from_multiplier(actual_multiplier)
-            verdict = "hit" if predicted_band == actual_band else "miss"
+        eval_payload = build_eval_payload(
+            round_id=int(row.id),
+            actual_multiplier=float(row.multiplier),
+            history=history,
+        )
+        if eval_payload is not None:
             await db.execute(
                 text(
                     "INSERT INTO prediction_evals "
@@ -100,13 +84,7 @@ async def post_rounds(
                     "VALUES (:round_id, :predicted_band, :actual_band, :actual_multiplier, :verdict) "
                     "ON CONFLICT (round_id) DO NOTHING"
                 ),
-                {
-                    "round_id": row.id,
-                    "predicted_band": predicted_band,
-                    "actual_band": actual_band,
-                    "actual_multiplier": actual_multiplier,
-                    "verdict": verdict,
-                },
+                eval_payload,
             )
 
         history.append(float(row.multiplier))
@@ -139,7 +117,7 @@ async def get_rounds(
     db: AsyncSession = Depends(get_db),
 ):
     rows = await db.execute(
-        text("SELECT id, multiplier, recorded_at FROM rounds ORDER BY recorded_at DESC LIMIT :limit"),
+        text("SELECT id, multiplier, recorded_at FROM rounds ORDER BY recorded_at DESC, id DESC LIMIT :limit"),
         {"limit": limit},
     )
     rounds = [

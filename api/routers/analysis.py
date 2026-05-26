@@ -153,9 +153,9 @@ async def get_analysis(
     rows = await db.execute(
         text(
             "SELECT multiplier FROM ("
-            "  SELECT multiplier, recorded_at FROM rounds"
-            "  ORDER BY recorded_at DESC LIMIT :lim"
-            ") sub ORDER BY recorded_at ASC"
+            "  SELECT multiplier, recorded_at, id FROM rounds"
+            "  ORDER BY recorded_at DESC, id DESC LIMIT :lim"
+            ") sub ORDER BY recorded_at ASC, id ASC"
         ),
         {"lim": _FETCH_LIMIT},
     )
