@@ -17,6 +17,9 @@ export type EvalRecentRow = {
 };
 
 export type EvalStatsResponse = {
+  total: number;
+  hits: number;
+  hit_rate: number | null;
   by_band: EvalStatsRow[];
   recent: EvalRecentRow[];
 };

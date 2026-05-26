@@ -282,7 +282,7 @@ export default function InputPage() {
       setStatus({ total_rounds: 0, ready: false, mlAvailable: false });
       setRounds([]);
       setEvalArchive({});
-      setEvalStats({ by_band: [], recent: [] });
+      setEvalStats({ total: 0, hits: 0, hit_rate: null, by_band: [], recent: [] });
     } catch {
       showToast("リセットに失敗しました。", "error");
     } finally {
@@ -312,7 +312,7 @@ export default function InputPage() {
       }
       showToast("予測シミュレーションをリセットしました。", "success");
       setEvalArchive({});
-      setEvalStats({ by_band: [], recent: [] });
+      setEvalStats({ total: 0, hits: 0, hit_rate: null, by_band: [], recent: [] });
       broadcastRef.current?.postMessage("update");
     } catch {
       showToast("予測シミュレーションのリセットに失敗しました。", "error");
@@ -352,6 +352,10 @@ export default function InputPage() {
   const remaining = status ? Math.max(0, READY_THRESHOLD - status.total_rounds) : null;
   const previewUpdatedAt = preview ? new Date(preview.captured_at) : null;
   const predictionSummary = buildPredictionSummary(evalStats?.by_band ?? []);
+  const totalPredictionCount = predictionSummary.reduce((sum, row) => sum + row.predictedCount, 0);
+  const totalPredictionHitCount = predictionSummary.reduce((sum, row) => sum + row.hitCount, 0);
+  const totalPredictionOverCount = predictionSummary.reduce((sum, row) => sum + (row.overCount ?? 0), 0);
+  const totalPredictionHitRate = totalPredictionCount > 0 ? (totalPredictionHitCount / totalPredictionCount) * 100 : null;
 
   return (
     <main className="min-h-screen p-6 max-w-xl mx-auto space-y-6">
@@ -537,6 +541,9 @@ export default function InputPage() {
           )}
 
           <div className="mt-4 overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/70">
+            <div className="border-b border-gray-800 px-3 py-2 text-xs text-gray-500">
+              総予測件数: <span className="text-gray-200 font-semibold">{evalStats?.total ?? totalPredictionCount}</span>
+            </div>
             <table className="min-w-full text-sm text-gray-200">
               <thead className="bg-gray-800/80 text-gray-300">
                 <tr>
@@ -565,6 +572,17 @@ export default function InputPage() {
                   </tr>
                 ))}
               </tbody>
+              <tfoot className="border-t border-gray-700 bg-gray-950/70">
+                <tr>
+                  <td className="px-3 py-2 font-semibold text-gray-200">合計</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">{totalPredictionCount}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">{totalPredictionHitCount}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">{totalPredictionOverCount}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">
+                    {totalPredictionHitRate === null ? "-" : `${totalPredictionHitRate.toFixed(1)}%`}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </section>

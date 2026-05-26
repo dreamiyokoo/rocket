@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bandLabelJa,
   buildEvalArchive,
+  buildPredictionSummary,
   type EvalStatsResponse,
   type PredictedBand,
+  type PredictionSummaryRow,
   type RoundEvalArchive,
 } from "./lib/evals";
 
@@ -161,12 +163,6 @@ function calcPredictionPnL(
   }
   const payoutHits = hitCount + (overCount ?? 0);
   return Math.round((-coinSize * predictedCount + coinSize * MIN_PAYOUT_MULTIPLIER[band] * payoutHits) * 100) / 100;
-}
-
-function isOverResult(predictedBand: PredictedBand, actualBand: PredictedBand): boolean {
-  if (predictedBand === "green") return actualBand === "yellow" || actualBand === "red";
-  if (predictedBand === "yellow") return actualBand === "red";
-  return false;
 }
 
 // ── Charts ───────────────────────────────────────────────────────────────────
@@ -400,6 +396,7 @@ export default function Home() {
   const [error, setError]       = useState(false);
   const [rounds, setRounds]     = useState<Round[]>([]);
   const [evalArchive, setEvalArchive] = useState<RoundEvalArchive>({});
+  const [evalStats, setEvalStats] = useState<EvalStatsResponse | null>(null);
   const [selectedCoinSize, setSelectedCoinSize] = useState<(typeof COIN_OPTIONS)[number]>(10);
   const [params, setParams]     = useState<Params>(DEFAULT_PARAMS);
   const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
@@ -444,6 +441,7 @@ export default function Home() {
       const res = await fetch(`${API_URL}/api/v1/evals/stats`, { cache: "no-store" });
       if (!res.ok) return;
       const evalData = await res.json() as EvalStatsResponse;
+      setEvalStats(evalData);
       setEvalArchive(buildEvalArchive(evalData.recent));
     } catch {
       // best-effort
@@ -533,32 +531,11 @@ export default function Home() {
   const remaining = data ? Math.max(0, READY_THRESHOLD - data.total_rounds) : null;
   const rsiNeeded  = READY_THRESHOLD + params.rsi_period;
   const macdNeeded = READY_THRESHOLD + params.macd_slow + params.macd_signal - 2;
-  const predictionSummary = (["red", "yellow", "green", "blue"] as PredictedBand[]).map((band) => {
-    let predictedCount = 0;
-    let hitCount = 0;
-    let overCount = 0;
-
-    for (const r of rounds) {
-      const ev = evalArchive[String(r.id)];
-      if (!ev || ev.predicted_band !== band) continue;
-      predictedCount += 1;
-      if (ev.verdict === "hit") {
-        hitCount += 1;
-        continue;
-      }
-      if (isOverResult(ev.predicted_band, ev.actual_band)) {
-        overCount += 1;
-      }
-    }
-
-    return {
-      band,
-      predictedCount,
-      hitCount,
-      overCount: band === "blue" || band === "red" ? null : overCount,
-      hitRate: predictedCount > 0 ? (hitCount / predictedCount) * 100 : null,
-    };
-  });
+  const predictionSummary: PredictionSummaryRow[] = buildPredictionSummary(evalStats?.by_band ?? []);
+  const totalPredictionCount = predictionSummary.reduce((sum, row) => sum + row.predictedCount, 0);
+  const totalPredictionHitCount = predictionSummary.reduce((sum, row) => sum + row.hitCount, 0);
+  const totalPredictionOverCount = predictionSummary.reduce((sum, row) => sum + (row.overCount ?? 0), 0);
+  const totalPredictionHitRate = totalPredictionCount > 0 ? (totalPredictionHitCount / totalPredictionCount) * 100 : null;
   const predictionSimulation = predictionSummary.map((row) => ({
     ...row,
     pnl: calcPredictionPnL(selectedCoinSize, row.predictedCount, row.hitCount, row.overCount, row.band),
@@ -1234,11 +1211,13 @@ export default function Home() {
               <tfoot className="border-t border-gray-700 bg-gray-900/70">
                 <tr>
                   <td className="px-3 py-2 font-semibold text-gray-200">合計</td>
-                  <td className="px-3 py-2 text-right text-gray-500">-</td>
-                  <td className="px-3 py-2 text-right text-gray-500">-</td>
-                  <td className="px-3 py-2 text-right text-gray-500">-</td>
-                  <td className="px-3 py-2 text-right text-gray-500">-</td>
-                  <td className="px-3 py-2 text-right text-gray-500">{selectedCoinSize}コイン基準</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">-</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">{totalPredictionCount}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">{totalPredictionHitCount}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">{totalPredictionOverCount}</td>
+                  <td className="px-3 py-2 text-right font-mono text-gray-200">
+                    {totalPredictionHitRate === null ? "-" : `${totalPredictionHitRate.toFixed(1)}%`}
+                  </td>
                   <td className={`px-3 py-2 text-right font-mono font-bold ${totalPredictionPnL >= 0 ? "text-green-300" : "text-red-300"}`}>
                     {totalPredictionPnL >= 0 ? "+" : ""}{fmt(totalPredictionPnL)}
                   </td>
