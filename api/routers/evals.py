@@ -7,11 +7,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
 from deps import get_current_user
+from ml.features import WINDOW
+from ml.predictor import decide_band, predict
 
 router = APIRouter(prefix="/api/v1/evals", tags=["evals"])
 
 VALID_BANDS = {"blue", "green", "yellow", "red"}
 VALID_VERDICTS = {"hit", "miss"}
+
+
+def _band_from_multiplier(value: float) -> str:
+    if value > 10.0:
+        return "red"
+    if value > 5.0:
+        return "yellow"
+    if value > 2.0:
+        return "green"
+    return "blue"
 
 
 class EvalPostRequest(BaseModel):
@@ -138,3 +150,60 @@ async def delete_evals(
     await db.execute(text("TRUNCATE prediction_evals"))
     await db.commit()
     return {"deleted": deleted}
+
+
+@router.post("/rebuild", status_code=200)
+async def rebuild_evals(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    """現行モデルで prediction_evals を全件再計算する。"""
+    rounds_rows = await db.execute(
+        text("SELECT id, multiplier FROM rounds ORDER BY recorded_at ASC, id ASC")
+    )
+    rounds = [{"id": int(r.id), "multiplier": float(r.multiplier)} for r in rounds_rows]
+
+    await db.execute(text("TRUNCATE prediction_evals"))
+
+    history: list[float] = []
+    payloads: list[dict] = []
+    for row in rounds:
+        predicted_band: str | None = None
+        if len(history) >= WINDOW:
+            prediction = predict(history)
+            if prediction.available:
+                predicted_band = decide_band(prediction)
+
+        if predicted_band is not None:
+            actual_multiplier = row["multiplier"]
+            actual_band = _band_from_multiplier(actual_multiplier)
+            verdict = "hit" if predicted_band == actual_band else "miss"
+            payloads.append(
+                {
+                    "round_id": row["id"],
+                    "predicted_band": predicted_band,
+                    "actual_band": actual_band,
+                    "actual_multiplier": actual_multiplier,
+                    "verdict": verdict,
+                }
+            )
+
+        history.append(row["multiplier"])
+        history = history[-WINDOW:]
+
+    if payloads:
+        await db.execute(
+            text(
+                "INSERT INTO prediction_evals "
+                "(round_id, predicted_band, actual_band, actual_multiplier, verdict) "
+                "VALUES (:round_id, :predicted_band, :actual_band, :actual_multiplier, :verdict)"
+            ),
+            payloads,
+        )
+
+    await db.commit()
+    return {
+        "rounds": len(rounds),
+        "rebuilt": len(payloads),
+        "skipped_head": min(len(rounds), WINDOW),
+    }

@@ -153,11 +153,11 @@ def predict(multipliers: list[float]) -> MLPrediction:
 
 
 def decide_band(prediction: MLPrediction) -> str:
-    """4色確率から、色別しきい値で補正した予測帯を返す。"""
+    """4色確率から最大確率のクラスを返す。"""
     scores = {
-        "blue": (prediction.prob_blue or 0.0) / max(_band_thresholds.get("blue", 0.25), 1e-6),
-        "green": (prediction.prob_green or 0.0) / max(_band_thresholds.get("green", 0.25), 1e-6),
-        "yellow": (prediction.prob_yellow or 0.0) / max(_band_thresholds.get("yellow", 0.25), 1e-6),
-        "red": (prediction.prob_red or 0.0) / max(_band_thresholds.get("red", 0.25), 1e-6),
+        "blue":   prediction.prob_blue   or 0.0,
+        "green":  prediction.prob_green  or 0.0,
+        "yellow": prediction.prob_yellow or 0.0,
+        "red":    prediction.prob_red    or 0.0,
     }
     return max(scores, key=scores.get)
