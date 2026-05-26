@@ -16,7 +16,7 @@ import pickle
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.metrics import classification_report, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 
 WINDOW = 30
@@ -27,6 +27,10 @@ MULTICLASS_FEATURE_COLS = [
     "std",
     "max",
     "min",
+    "p90",
+    "p95",
+    "max5",
+    "gap_since_10x",
     "cv",
     "prob_2x",
     "prob_5x",
@@ -48,7 +52,13 @@ BINARY_EXTRA_FEATURE_COLS = [
     "very_low_streak",
 ]
 BINARY_FEATURE_COLS = MULTICLASS_FEATURE_COLS + BINARY_EXTRA_FEATURE_COLS
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "api", "ml", "models")
+_SCRIPT_DIR = os.path.dirname(__file__)
+_CONTAINER_MODEL_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "ml", "models"))
+_REPO_MODEL_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", "api", "ml", "models"))
+MODEL_DIR = os.environ.get("ML_MODEL_DIR") or (
+    _CONTAINER_MODEL_DIR if os.path.isdir(_CONTAINER_MODEL_DIR) else _REPO_MODEL_DIR
+)
+CLASS_NAMES = ["blue", "green", "yellow", "red"]
 
 
 def recency_weight(n: int, half_life: int = RECENCY_HALF_LIFE) -> np.ndarray:
@@ -96,6 +106,10 @@ def make_features(df: pd.DataFrame, window: int = WINDOW) -> pd.DataFrame:
             "std": np.std(w),
             "max": np.max(w),
             "min": np.min(w),
+            "p90": np.percentile(w, 90),
+            "p95": np.percentile(w, 95),
+            "max5": np.max(w[-5:]),
+            "gap_since_10x": next((j for j, x in enumerate(reversed(w)) if x >= 10.0), window),
             "cv": np.std(w) / (np.mean(w) + 1e-6),
             "prob_2x": np.mean(w >= 2.0),
             "prob_5x": np.mean(w >= 5.0),
@@ -149,6 +163,7 @@ def train_multiclass(feat_df: pd.DataFrame):
     model.fit(X_train, y_train, sample_weight=recency_weight(len(X_train)))
 
     y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)
     print("\n===== 4クラス分類 (Blue / Green / Yellow / Red) =====")
     print(
         classification_report(
@@ -162,7 +177,30 @@ def train_multiclass(feat_df: pd.DataFrame):
     print("特徴量重要度 (上位10):")
     print(feat_imp.head(10).to_string())
 
-    return model
+    band_thresholds = tune_band_thresholds(y_test.values, y_proba)
+    print("色別しきい値(One-vs-Rest F1 最適化):", band_thresholds)
+
+    return model, band_thresholds
+
+
+def tune_band_thresholds(y_true: np.ndarray, y_proba: np.ndarray) -> dict[str, float]:
+    thresholds: dict[str, float] = {}
+    grid = np.linspace(0.05, 0.95, 91)
+
+    for idx, name in enumerate(CLASS_NAMES):
+        y_bin = (y_true == idx).astype(int)
+        probs = y_proba[:, idx]
+        best_t = 0.25
+        best_f1 = -1.0
+        for t in grid:
+            pred = (probs >= t).astype(int)
+            score = f1_score(y_bin, pred, zero_division=0)
+            if score > best_f1:
+                best_f1 = score
+                best_t = float(t)
+        thresholds[name] = round(best_t, 3)
+
+    return thresholds
 
 
 def train_binary(feat_df: pd.DataFrame):
@@ -204,7 +242,7 @@ def train_binary(feat_df: pd.DataFrame):
     return model, threshold_info
 
 
-def save_models(multiclass_model, binary_model, threshold_info: dict):
+def save_models(multiclass_model, binary_model, threshold_info: dict, band_thresholds: dict[str, float]):
     os.makedirs(MODEL_DIR, exist_ok=True)
     mc_path = os.path.join(MODEL_DIR, "multiclass.pkl")
     bi_path = os.path.join(MODEL_DIR, "binary.pkl")
@@ -215,7 +253,13 @@ def save_models(multiclass_model, binary_model, threshold_info: dict):
     with open(bi_path, "wb") as f:
         pickle.dump(binary_model, f)
     with open(th_path, "w", encoding="utf-8") as f:
-        json.dump({"blue_warn_threshold": round(float(threshold_info["threshold"]), 3)}, f)
+        json.dump(
+            {
+                "blue_warn_threshold": round(float(threshold_info["threshold"]), 3),
+                "band_thresholds": band_thresholds,
+            },
+            f,
+        )
 
     print(f"\nモデルを保存しました: {mc_path}, {bi_path}, {th_path}")
 
@@ -238,11 +282,11 @@ def main():
     feat_df = make_features(df)
     print(f"特徴量行数: {len(feat_df)}")
 
-    mc_model = train_multiclass(feat_df.copy())
+    mc_model, band_thresholds = train_multiclass(feat_df.copy())
     bi_model, threshold_info = train_binary(feat_df.copy())
 
     if args.save:
-        save_models(mc_model, bi_model, threshold_info)
+        save_models(mc_model, bi_model, threshold_info, band_thresholds)
 
 
 if __name__ == "__main__":

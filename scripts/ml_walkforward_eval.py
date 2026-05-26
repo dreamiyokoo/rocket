@@ -11,12 +11,13 @@ import os
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
-from sklearn.metrics import accuracy_score, roc_auc_score, f1_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, precision_score, recall_score, roc_auc_score, f1_score
 
 WINDOW = 30
 RECENCY_HALF_LIFE = 1200
 FEATURE_COLS = [
     'mean', 'median', 'std', 'max', 'min', 'cv',
+    'p90', 'p95', 'max5', 'gap_since_10x',
     'prob_2x', 'prob_5x', 'prob_10x', 'low_streak',
     'slope', 'log_mean', 'log_std', 'momentum',
 ]
@@ -25,6 +26,12 @@ BINARY_EXTRA_FEATURE_COLS = [
     'min5', 'mean5', 'mean10', 'std5', 'very_low_streak',
 ]
 BINARY_FEATURE_COLS = FEATURE_COLS + BINARY_EXTRA_FEATURE_COLS
+CLASS_LABELS = ["blue", "green", "yellow", "red"]
+
+
+def per_class_scores(y_true, y_pred, score_fn):
+    scores = score_fn(y_true, y_pred, average=None, labels=[0, 1, 2, 3], zero_division=0)
+    return {f"{score_fn.__name__.replace('_score', '')}_{label}": float(score) for label, score in zip(CLASS_LABELS, scores)}
 
 
 def recency_weight(n: int, half_life: int = RECENCY_HALF_LIFE) -> np.ndarray:
@@ -43,6 +50,10 @@ def make_features(df: pd.DataFrame, window: int = WINDOW) -> pd.DataFrame:
             'std': np.std(w),
             'max': np.max(w),
             'min': np.min(w),
+            'p90': np.percentile(w, 90),
+            'p95': np.percentile(w, 95),
+            'max5': np.max(w[-5:]),
+            'gap_since_10x': next((j for j, x in enumerate(reversed(w)) if x >= 10.0), window),
             'cv': np.std(w) / (np.mean(w) + 1e-6),
             'prob_2x': np.mean(w >= 2.0),
             'prob_5x': np.mean(w >= 5.0),
@@ -75,6 +86,19 @@ def label_regime(x: float) -> int:
     return 3
 
 
+def load_rounds_csv(csv_path: str) -> pd.DataFrame:
+    df = pd.read_csv(csv_path, parse_dates=['recorded_at'])
+    if {'id', 'multiplier', 'recorded_at'}.issubset(df.columns):
+        return df
+
+    return pd.read_csv(
+        csv_path,
+        names=['id', 'multiplier', 'recorded_at'],
+        parse_dates=['recorded_at'],
+        skiprows=1,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--csv', default='docs/rounds_export_ml.csv')
@@ -86,7 +110,7 @@ def main():
     if not os.path.isabs(csv_path):
         csv_path = os.path.join(os.path.dirname(__file__), '..', csv_path)
 
-    df = pd.read_csv(csv_path, names=['id', 'multiplier', 'recorded_at'], parse_dates=['recorded_at'])
+    df = load_rounds_csv(csv_path)
     df = df.sort_values('recorded_at').reset_index(drop=True)
     feat_df = make_features(df)
 
@@ -139,6 +163,8 @@ def main():
         mc.fit(X_train_m, y_train_m, sample_weight=w)
         pred_m = mc.predict(X_test_m)
         acc = accuracy_score(y_test_m, pred_m)
+        balanced_acc = balanced_accuracy_score(y_test_m, pred_m)
+        macro_f1 = f1_score(y_test_m, pred_m, average='macro', zero_division=0)
 
         bi = lgb.LGBMClassifier(
             n_estimators=500,
@@ -154,17 +180,22 @@ def main():
         proba_b = bi.predict_proba(X_test_b)[:, 1]
         auc = roc_auc_score(y_test_b, proba_b)
 
-        rows.append({
+        row = {
             'fold': f + 1,
             'train_end': test_start,
             'test_size': len(X_test_m),
             'acc_4class': acc,
+            'balanced_acc_4class': balanced_acc,
+            'macro_f1_4class': macro_f1,
             'auc_blue': auc,
             'f1_blue': f1_score(y_test_m, pred_m, labels=[0], average='macro', zero_division=0),
             'f1_green': f1_score(y_test_m, pred_m, labels=[1], average='macro', zero_division=0),
             'f1_yellow': f1_score(y_test_m, pred_m, labels=[2], average='macro', zero_division=0),
             'f1_red': f1_score(y_test_m, pred_m, labels=[3], average='macro', zero_division=0),
-        })
+        }
+        row.update(per_class_scores(y_test_m, pred_m, precision_score))
+        row.update(per_class_scores(y_test_m, pred_m, recall_score))
+        rows.append(row)
 
     out = pd.DataFrame(rows)
     if out.empty:
@@ -175,7 +206,25 @@ def main():
     print(out.to_string(index=False, float_format=lambda x: f'{x:.4f}'))
 
     print('\n-- Summary --')
-    print(out[['acc_4class', 'auc_blue', 'f1_blue', 'f1_green', 'f1_yellow', 'f1_red']].agg(['mean', 'min', 'max']).to_string(float_format=lambda x: f'{x:.4f}'))
+    summary_cols = [
+        'acc_4class',
+        'balanced_acc_4class',
+        'macro_f1_4class',
+        'auc_blue',
+        'precision_blue',
+        'precision_green',
+        'precision_yellow',
+        'precision_red',
+        'recall_blue',
+        'recall_green',
+        'recall_yellow',
+        'recall_red',
+        'f1_blue',
+        'f1_green',
+        'f1_yellow',
+        'f1_red',
+    ]
+    print(out[summary_cols].agg(['mean', 'min', 'max']).to_string(float_format=lambda x: f'{x:.4f}'))
 
 
 if __name__ == '__main__':

@@ -16,6 +16,12 @@ _THRESHOLDS_PATH = os.path.join(_MODELS_DIR, "thresholds.json")
 
 # Stage 1: <=2.0x 回避警告の閾値（最新再学習の推奨値）
 BLUE_WARN_THRESHOLD = 0.387
+DEFAULT_BAND_THRESHOLDS = {
+    "blue": 0.25,
+    "green": 0.25,
+    "yellow": 0.25,
+    "red": 0.25,
+}
 
 
 def _load_blue_warn_threshold() -> float:
@@ -30,10 +36,26 @@ def _load_blue_warn_threshold() -> float:
         pass
     return BLUE_WARN_THRESHOLD
 
+
+def _load_band_thresholds() -> dict[str, float]:
+    try:
+        with open(_THRESHOLDS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        raw = data.get("band_thresholds", {})
+        loaded = DEFAULT_BAND_THRESHOLDS.copy()
+        for k in loaded:
+            v = float(raw.get(k, loaded[k]))
+            if 0.01 <= v <= 0.99:
+                loaded[k] = v
+        return loaded
+    except Exception:
+        return DEFAULT_BAND_THRESHOLDS.copy()
+
 _multiclass_model = None
 _binary_model = None
 _last_mtime: float = 0.0
 _blue_warn_threshold: float = BLUE_WARN_THRESHOLD
+_band_thresholds: dict[str, float] = DEFAULT_BAND_THRESHOLDS.copy()
 
 
 def _models_mtime() -> float:
@@ -50,7 +72,7 @@ def _models_mtime() -> float:
 
 
 def _load_models() -> None:
-    global _multiclass_model, _binary_model, _last_mtime, _blue_warn_threshold
+    global _multiclass_model, _binary_model, _last_mtime, _blue_warn_threshold, _band_thresholds
     current_mtime = _models_mtime()
     if current_mtime == 0.0 or current_mtime == _last_mtime:
         return
@@ -62,8 +84,14 @@ def _load_models() -> None:
         with open(bi_path, "rb") as f:
             _binary_model = pickle.load(f)
         _blue_warn_threshold = _load_blue_warn_threshold()
+        _band_thresholds = _load_band_thresholds()
         _last_mtime = current_mtime
-        logger.info("ML models loaded (mtime=%.0f, blue_warn_threshold=%.3f)", current_mtime, _blue_warn_threshold)
+        logger.info(
+            "ML models loaded (mtime=%.0f, blue_warn_threshold=%.3f, band_thresholds=%s)",
+            current_mtime,
+            _blue_warn_threshold,
+            _band_thresholds,
+        )
     except FileNotFoundError as e:
         logger.warning("ML model files not found: %s", e)
     except Exception as e:
@@ -122,3 +150,14 @@ def predict(multipliers: list[float]) -> MLPrediction:
         skip_recommended=prob_blue_binary >= _blue_warn_threshold,
         entry_boost=prob_red > 0.30,
     )
+
+
+def decide_band(prediction: MLPrediction) -> str:
+    """4色確率から、色別しきい値で補正した予測帯を返す。"""
+    scores = {
+        "blue": (prediction.prob_blue or 0.0) / max(_band_thresholds.get("blue", 0.25), 1e-6),
+        "green": (prediction.prob_green or 0.0) / max(_band_thresholds.get("green", 0.25), 1e-6),
+        "yellow": (prediction.prob_yellow or 0.0) / max(_band_thresholds.get("yellow", 0.25), 1e-6),
+        "red": (prediction.prob_red or 0.0) / max(_band_thresholds.get("red", 0.25), 1e-6),
+    }
+    return max(scores, key=scores.get)

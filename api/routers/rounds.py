@@ -9,7 +9,7 @@ from core.database import get_db
 from core.redis import get_redis
 from deps import get_current_user
 from ml.features import WINDOW
-from ml.predictor import predict
+from ml.predictor import decide_band, predict
 from routers.analysis import CACHE_KEY as ANALYSIS_CACHE_KEY
 
 router = APIRouter(prefix="/api/v1/rounds", tags=["rounds"])
@@ -36,14 +36,7 @@ def _predicted_band(history: list[float]) -> str | None:
     prediction = predict(history)
     if not prediction.available:
         return None
-
-    probs = {
-        "blue": prediction.prob_blue or 0.0,
-        "green": prediction.prob_green or 0.0,
-        "yellow": prediction.prob_yellow or 0.0,
-        "red": prediction.prob_red or 0.0,
-    }
-    return max(probs, key=probs.get)
+    return decide_band(prediction)
 
 
 class RoundsPostRequest(BaseModel):

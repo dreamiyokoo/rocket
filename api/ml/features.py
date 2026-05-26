@@ -11,6 +11,10 @@ MULTICLASS_FEATURE_COLS = [
     "std",
     "max",
     "min",
+    "p90",
+    "p95",
+    "max5",
+    "gap_since_10x",
     "cv",
     "prob_2x",
     "prob_5x",
@@ -81,6 +85,18 @@ def make_feature_vector(window: list[float]) -> list[float]:
     prob_5x = sum(1 for x in window if x >= 5.0) / n
     prob_10x = sum(1 for x in window if x >= 10.0) / n
 
+    s = sorted(window)
+    # nearest-rank percentile (0-indexed)
+    p90 = s[min(n - 1, int((n - 1) * 0.90))]
+    p95 = s[min(n - 1, int((n - 1) * 0.95))]
+    max5 = max(window[-5:])
+
+    gap_since_10x = n
+    for i, x in enumerate(reversed(window)):
+        if x >= 10.0:
+            gap_since_10x = i
+            break
+
     low_streak = 0
     for x in reversed(window):
         if x < 1.5:
@@ -97,7 +113,7 @@ def make_feature_vector(window: list[float]) -> list[float]:
     momentum = sum(window[-5:]) / 5 - sum(window[:5]) / 5
 
     return [
-        mean, median, std, max(window), min(window), cv,
+        mean, median, std, max(window), min(window), p90, p95, max5, gap_since_10x, cv,
         prob_2x, prob_5x, prob_10x, low_streak,
         slope, log_mean, log_std, momentum,
     ]

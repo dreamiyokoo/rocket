@@ -15,7 +15,7 @@ from typing import Optional
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, classification_report, f1_score, roc_auc_score
 
 WINDOW = 30
 FEATURE_COLS = [
@@ -24,6 +24,10 @@ FEATURE_COLS = [
     "std",
     "max",
     "min",
+    "p90",
+    "p95",
+    "max5",
+    "gap_since_10x",
     "cv",
     "prob_2x",
     "prob_5x",
@@ -48,6 +52,19 @@ class Candidate:
     half_life: Optional[int]
 
 
+def load_rounds_csv(csv_path: str) -> pd.DataFrame:
+    df = pd.read_csv(csv_path, parse_dates=["recorded_at"])
+    if {"id", "multiplier", "recorded_at"}.issubset(df.columns):
+        return df
+
+    return pd.read_csv(
+        csv_path,
+        names=["id", "multiplier", "recorded_at"],
+        parse_dates=["recorded_at"],
+        skiprows=1,
+    )
+
+
 def make_features(df: pd.DataFrame, window: int = WINDOW) -> pd.DataFrame:
     rows = []
     for i in range(window, len(df)):
@@ -58,6 +75,10 @@ def make_features(df: pd.DataFrame, window: int = WINDOW) -> pd.DataFrame:
             "std": np.std(w),
             "max": np.max(w),
             "min": np.min(w),
+            "p90": np.percentile(w, 90),
+            "p95": np.percentile(w, 95),
+            "max5": np.max(w[-5:]),
+            "gap_since_10x": next((j for j, x in enumerate(reversed(w)) if x >= 10.0), window),
             "cv": np.std(w) / (np.mean(w) + 1e-6),
             "prob_2x": np.mean(w >= 2.0),
             "prob_5x": np.mean(w >= 5.0),
@@ -100,11 +121,7 @@ def main() -> None:
     if not os.path.isabs(csv_path):
         csv_path = os.path.join(os.path.dirname(__file__), "..", csv_path)
 
-    df = pd.read_csv(
-        csv_path,
-        names=["id", "multiplier", "recorded_at"],
-        parse_dates=["recorded_at"],
-    )
+    df = load_rounds_csv(csv_path)
     df = df.sort_values("recorded_at").reset_index(drop=True)
 
     feat_df = make_features(df)
@@ -134,9 +151,9 @@ def main() -> None:
     ]
 
     best = None
-    best_acc = -1.0
+    best_score = -1.0
 
-    print("=== Validation Search (4class accuracy priority) ===")
+    print("=== Validation Search (4class balance priority) ===")
     for c in candidates:
         w = recency_weight(len(X_train), c.half_life)
         model = lgb.LGBMClassifier(
@@ -152,9 +169,15 @@ def main() -> None:
         model.fit(X_train, y_train_multi, sample_weight=w)
         pred_val = model.predict(X_val)
         acc = accuracy_score(y_val_multi, pred_val)
-        print(f"{c.name:>16}: acc={acc:.4f}")
-        if acc > best_acc:
-            best_acc = acc
+        balanced_acc = balanced_accuracy_score(y_val_multi, pred_val)
+        macro_f1 = f1_score(y_val_multi, pred_val, average="macro", zero_division=0)
+        balance_score = (balanced_acc + macro_f1) / 2
+        print(
+            f"{c.name:>16}: acc={acc:.4f} balanced_acc={balanced_acc:.4f} "
+            f"macro_f1={macro_f1:.4f} score={balance_score:.4f}"
+        )
+        if balance_score > best_score:
+            best_score = balance_score
             best = c
 
     assert best is not None
@@ -174,9 +197,13 @@ def main() -> None:
     mc_model.fit(X_train_full, y_train_full_multi, sample_weight=w_full)
     pred_test = mc_model.predict(X_test)
     acc_test = accuracy_score(y_test_multi, pred_test)
+    balanced_acc_test = balanced_accuracy_score(y_test_multi, pred_test)
+    macro_f1_test = f1_score(y_test_multi, pred_test, average="macro", zero_division=0)
 
     print("\n===== 4class Test =====")
     print(f"accuracy: {acc_test:.4f}")
+    print(f"balanced_accuracy: {balanced_acc_test:.4f}")
+    print(f"macro_f1: {macro_f1_test:.4f}")
     print(classification_report(y_test_multi, pred_test, target_names=["Blue", "Green", "Yellow", "Red"]))
 
     # 2値モデルは既存に近い設定で、同じ重みのみ適用

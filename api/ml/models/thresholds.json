@@ -1,1 +1,1 @@
-{"blue_warn_threshold": 0.393}
+{"blue_warn_threshold": 0.395, "band_thresholds": {"blue": 0.05, "green": 0.06, "yellow": 0.05, "red": 0.19}}
