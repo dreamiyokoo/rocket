@@ -12,8 +12,10 @@ import {
 } from "./lib/evals";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const POLL_INTERVAL = 10_000;
+const POLL_INTERVAL = 5_000;
+const FAST_POLL_INTERVAL = 2_000;
 const WS_RECONNECT_DELAY = 3_000; // WebSocket 切断後の再接続待機（ms）
+const ENABLE_WS = false; // Polling is sufficient and avoids reconnect storms.
 const READY_THRESHOLD = 18;
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -50,6 +52,11 @@ type MLPrediction = {
   prob_blue_binary?: number;
   skip_recommended?: boolean;
   entry_boost?: boolean;
+  predicted_band_base?: "blue" | "green" | "yellow" | "red";
+  predicted_band_adjusted?: "blue" | "green" | "yellow" | "red";
+  adjustment_applied?: boolean;
+  adjustment_pattern?: string | null;
+  adjustment_scope?: string;
 };
 
 type AnalysisData = {
@@ -220,57 +227,105 @@ function ProbMacdChart({ data }: { data: AnalysisData }) {
     return { macdLine: macdLine.slice(offset), signalLine: signalLine.slice(sig - 1), histogram, offset };
   }
 
-  const h20 = data.prob_2_0x?.history ?? [];
-  const h12 = data.prob_1_2x?.history ?? [];
-  const m20 = buildMacdSeries(h20);
-  const m12 = buildMacdSeries(h12);
+  const h2 = data.prob_2x?.history ?? [];
+  const h5 = data.prob_5x?.history ?? [];
+  const h10 = data.prob_10x?.history ?? [];
+  const nBase = Math.min(h2.length, h5.length, h10.length);
 
-  const allVals = [...m20.histogram, ...m20.macdLine, ...m20.signalLine,
-                   ...m12.histogram, ...m12.macdLine, ...m12.signalLine].filter(isFinite);
-  if (allVals.length === 0) return <p className="text-sm text-gray-500 py-8 text-center">データ不足</p>;
+  if (nBase === 0) return <p className="text-sm text-gray-500 py-8 text-center">データ不足</p>;
 
-  const sorted = [...allVals].sort((a, b) => a - b);
-  const med = sorted[Math.floor(sorted.length / 2)];
-  const mads = sorted.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
-  const mad = mads[Math.floor(mads.length / 2)];
-  const spread = Math.max(mad * 6, 0.005);
-  const lo = med - spread, hi = med + spread;
-  const yM = (v: number) => yLinear(Math.max(lo, Math.min(hi, v)), lo, hi);
-  const zero = yM(0);
-  const n = m20.histogram.length;
-  const barW = Math.max(1, (PW / Math.max(n, 1)) * 0.5);
+  // Show only the recent half for quicker visual trend checks.
+  const start = Math.floor(nBase / 2);
+  const greenAtLeast = h2.slice(start, nBase);
+  const yellowAtLeast = h5.slice(start, nBase);
+  const redAtLeast = h10.slice(start, nBase);
 
-  function histBars(histogram: number[], color1: string, color2: string) {
-    return histogram.map((h, i) => {
-      const x = xOf(i, n);
-      const y0 = zero, yh = yM(h);
-      const top = Math.min(y0, yh), ht = Math.abs(y0 - yh);
-      return <rect key={i} x={x - barW / 2} y={top} width={barW} height={Math.max(1, ht)}
-        fill={h >= 0 ? color1 : color2} opacity="0.5" />;
-    });
-  }
-  function linePath(arr: number[], color: string, dash?: string) {
-    return <path d={toPath(arr.map((v, i) => [xOf(i, n), yM(v)] as const))}
-      fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round"
-      strokeDasharray={dash} />;
+  const miniW = 300;
+  const miniH = 150;
+  const miniML = 32;
+  const miniMR = 6;
+  const miniMT = 10;
+  const miniMB = 20;
+  const miniVW = miniML + miniW + miniMR;
+  const miniVH = miniMT + miniH + miniMB;
+
+  const xMini = (i: number, n: number) => miniML + (n <= 1 ? miniW / 2 : (i / (n - 1)) * miniW);
+
+  function renderMini(
+    title: string,
+    values: number[],
+    macdColor: string,
+    signalColor: string,
+    posColor: string,
+    negColor: string,
+  ) {
+    const m = buildMacdSeries(values);
+    const vals = [...m.histogram, ...m.macdLine, ...m.signalLine].filter(isFinite);
+
+    if (vals.length === 0) {
+      return (
+        <div className="rounded-lg border border-gray-800 bg-gray-950/60 p-3" key={title}>
+          <p className="text-xs text-gray-300 mb-2">{title}</p>
+          <p className="text-xs text-gray-500 py-8 text-center">データ不足</p>
+        </div>
+      );
+    }
+
+    const sorted = [...vals].sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    const mads = sorted.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
+    const mad = mads[Math.floor(mads.length / 2)];
+    const spread = Math.max(mad * 6, 0.004);
+    const lo = med - spread;
+    const hi = med + spread;
+    const y = (v: number) => miniMT + miniH - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo || 1)) * miniH;
+    const zero = y(0);
+    const n = m.histogram.length;
+    const barW = Math.max(1, (miniW / Math.max(n, 1)) * 0.55);
+
+    return (
+      <div className="rounded-lg border border-gray-800 bg-gray-950/60 p-3" key={title}>
+        <p className="text-xs text-gray-300 mb-2">{title}</p>
+        <svg viewBox={`0 0 ${miniVW} ${miniVH}`} className="w-full h-auto">
+          <line x1={miniML} y1={zero} x2={miniML + miniW} y2={zero} stroke="#4b5563" strokeDasharray="4 2" />
+          <text x={miniML - 3} y={zero + 3} textAnchor="end" fill="#9ca3af" fontSize="9">0</text>
+          {m.histogram.map((h, i) => {
+            const x = xMini(i, n);
+            const y0 = zero;
+            const yh = y(h);
+            const top = Math.min(y0, yh);
+            const ht = Math.max(1, Math.abs(y0 - yh));
+            return <rect key={i} x={x - barW / 2} y={top} width={barW} height={ht} fill={h >= 0 ? posColor : negColor} opacity="0.55" />;
+          })}
+          <path
+            d={toPath(m.macdLine.map((v, i) => [xMini(i, n), y(v)] as const))}
+            fill="none"
+            stroke={macdColor}
+            strokeWidth="1.4"
+            strokeLinejoin="round"
+          />
+          <path
+            d={toPath(m.signalLine.map((v, i) => [xMini(i, n), y(v)] as const))}
+            fill="none"
+            stroke={signalColor}
+            strokeWidth="1.2"
+            strokeLinejoin="round"
+            strokeDasharray="4 2"
+          />
+          <line x1={miniML} y1={miniMT + miniH} x2={miniML + miniW} y2={miniMT + miniH} stroke="#4b5563" />
+          <text x={miniML} y={miniVH} fill="#6b7280" fontSize="9">1</text>
+          <text x={miniML + miniW} y={miniVH} textAnchor="end" fill="#6b7280" fontSize="9">{n}</text>
+        </svg>
+      </div>
+    );
   }
 
   return (
-    <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-auto">
-      <line x1={ML} y1={zero} x2={ML + PW} y2={zero} stroke="#4b5563" strokeDasharray="4 2" />
-      <text x={ML - 4} y={zero + 4} textAnchor="end" fill="#9ca3af" fontSize="10">0</text>
-      {/* 2.0x以下 */}
-      {histBars(m20.histogram, "#fb923c", "#1d4ed8")}
-      {linePath(m20.macdLine, "#fb923c")}
-      {linePath(m20.signalLine, "#f97316", "4 2")}
-      {/* 1.2x以下 */}
-      {histBars(m12.histogram, "#94a3b880", "#1e3a5f80")}
-      {linePath(m12.macdLine, "#94a3b8")}
-      {linePath(m12.signalLine, "#64748b", "4 2")}
-      <line x1={ML} y1={MT + PH} x2={ML + PW} y2={MT + PH} stroke="#4b5563" />
-      <text x={ML} y={VH} fill="#6b7280" fontSize="10">1</text>
-      <text x={ML + PW} y={VH} textAnchor="end" fill="#6b7280" fontSize="10">{n}</text>
-    </svg>
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      {renderMini("緑以上 (2.01+)", greenAtLeast, "#4ade80", "#22c55e", "#4ade80", "#1e40af")}
+      {renderMini("黄以上 (5.01+)", yellowAtLeast, "#facc15", "#eab308", "#facc15", "#1e3a5f")}
+      {renderMini("赤 (10.01+)", redAtLeast, "#f87171", "#ef4444", "#f87171", "#312e81")}
+    </div>
   );
 }
 
@@ -391,7 +446,6 @@ function predictedBandDotClass(band: PredictedBand): string {
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  type ChartTab = "prob" | "multiplier" | "rsi" | "macd" | "prob_macd";
   const [data, setData]         = useState<AnalysisData | null>(null);
   const [error, setError]       = useState(false);
   const [rounds, setRounds]     = useState<Round[]>([]);
@@ -401,9 +455,10 @@ export default function Home() {
   const [params, setParams]     = useState<Params>(DEFAULT_PARAMS);
   const [draft, setDraft]       = useState<Params>(DEFAULT_PARAMS);
   const [showSettings, setShowSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<ChartTab>("prob");
   const [soundEnabled, setSoundEnabled] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [elapsedSinceUpdateSec, setElapsedSinceUpdateSec] = useState<number | null>(null);
+  const slowTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fastTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const evalStatsRequestRef = useRef<Promise<void> | null>(null);
   const paramsRef = useRef<Params>(params);
   const prevEntryOkRef = useRef<boolean>(false);
@@ -412,7 +467,7 @@ export default function Home() {
 
   const fetchRounds = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/v1/rounds`);
+      const res = await fetch(`${API_URL}/api/v1/rounds`, { cache: "no-store" });
       if (!res.ok) return;
       const json = await res.json() as { rounds: Round[] };
       setRounds(json.rounds);
@@ -427,7 +482,7 @@ export default function Home() {
         macd_slow:   String(p.macd_slow),
         macd_signal: String(p.macd_signal),
       });
-      const res = await fetch(`${API_URL}/api/v1/analysis?${qs}`);
+      const res = await fetch(`${API_URL}/api/v1/analysis?${qs}`, { cache: "no-store" });
       if (!res.ok) { setError(true); return; }
       setData(await res.json() as AnalysisData);
       setError(false);
@@ -461,13 +516,25 @@ export default function Home() {
     fetchData(params);
     fetchRounds();
     refreshEvalStats();
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
+
+    if (slowTimerRef.current) clearInterval(slowTimerRef.current);
+    if (fastTimerRef.current) clearInterval(fastTimerRef.current);
+
+    // Heavy endpoints are kept at 5s to avoid load spikes.
+    slowTimerRef.current = setInterval(() => {
       fetchData(params);
-      fetchRounds();
       refreshEvalStats();
     }, POLL_INTERVAL);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+
+    // Lightweight endpoints are polled faster for better perceived responsiveness.
+    fastTimerRef.current = setInterval(() => {
+      fetchRounds();
+    }, FAST_POLL_INTERVAL);
+
+    return () => {
+      if (slowTimerRef.current) clearInterval(slowTimerRef.current);
+      if (fastTimerRef.current) clearInterval(fastTimerRef.current);
+    };
   }, [params, fetchData, fetchRounds, refreshEvalStats]);
 
   useEffect(() => {
@@ -476,6 +543,7 @@ export default function Home() {
     let destroyed = false;
 
     const connect = () => {
+      if (!ENABLE_WS) return;
       if (destroyed) return;
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`);
@@ -527,6 +595,23 @@ export default function Home() {
     }
     prevEntryOkRef.current = entryOk;
   }, [data, soundEnabled]);
+
+  useEffect(() => {
+    if (!data?.analyzed_at) {
+      setElapsedSinceUpdateSec(null);
+      return;
+    }
+
+    const analyzedAtMs = new Date(data.analyzed_at).getTime();
+    const updateElapsed = () => {
+      const sec = Math.max(0, Math.floor((Date.now() - analyzedAtMs) / 1000));
+      setElapsedSinceUpdateSec(sec);
+    };
+
+    updateElapsed();
+    const id = setInterval(updateElapsed, 1000);
+    return () => clearInterval(id);
+  }, [data?.analyzed_at]);
 
   const remaining = data ? Math.max(0, READY_THRESHOLD - data.total_rounds) : null;
   const rsiNeeded  = READY_THRESHOLD + params.rsi_period;
@@ -701,7 +786,12 @@ export default function Home() {
               <h2 className="text-sm font-semibold text-gray-300">推奨ライン</h2>
               <span className={`text-xs font-bold px-2 py-0.5 rounded ${regimeColor}`}>{regimeLabel}</span>
               <span className={`text-xs font-bold px-2 py-0.5 rounded ${flowColor}`}>{flowLabel}</span>
-              <span className="text-xs text-gray-500 ml-auto">CV {rec.volatility_cv.toFixed(2)}</span>
+              <div className="ml-auto flex items-center gap-3">
+                {elapsedSinceUpdateSec != null && (
+                  <span className="text-xs text-cyan-300">更新後 {elapsedSinceUpdateSec} 秒経過</span>
+                )}
+                <span className="text-xs text-gray-500">CV {rec.volatility_cv.toFixed(2)}</span>
+              </div>
             </div>
 
             {/* Bet advice banner */}
@@ -762,6 +852,9 @@ export default function Home() {
                   level2nd = sorted[1][0];
                 }
 
+                const baseLevel = (ml?.predicted_band_base as Level | undefined) ?? level;
+                const adjustedLevel = (ml?.predicted_band_adjusted as Level | undefined) ?? baseLevel;
+
                 const levelDefs: { id: Level; label: string; range: string; active: string; semi: string; inactive: string; dot: string; text: string; textSemi: string; bar: string }[] = [
                   { id: "blue",   label: "🔵 Blue",   range: "≤ 2.0x",
                     active:   "bg-blue-900 border-2 border-blue-400",
@@ -789,20 +882,35 @@ export default function Home() {
                   blue: probBlue, green: probGreen, yellow: probYellow, red: probRed,
                 };
 
-                const activeLevelDef = levelDefs.find(lv => lv.id === level);
+                const activeLevelDef = levelDefs.find(lv => lv.id === baseLevel);
+                const adjustedLevelDef = levelDefs.find(lv => lv.id === adjustedLevel);
 
                 return (
                   <>
-                    {/* 予測色表示 */}
-                    {available && activeLevelDef && (
-                      <div className={`rounded-lg p-4 text-center ${activeLevelDef.active}`}>
-                        <p className="text-xs text-gray-300 mb-2">予測色</p>
-                        <p className={`text-3xl font-bold ${activeLevelDef.text}`}>
-                          {activeLevelDef.label}
-                        </p>
-                        <p className={`text-2xl font-bold ${activeLevelDef.text} mt-1`}>
-                          {(probMap[level]! * 100).toFixed(0)}%
-                        </p>
+                    {/* 予測色表示（通常 / 補正） */}
+                    {available && activeLevelDef && adjustedLevelDef && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div className={`rounded-lg p-4 text-center ${activeLevelDef.active}`}>
+                          <p className="text-xs text-gray-300 mb-2">通常予測</p>
+                          <p className={`text-3xl font-bold ${activeLevelDef.text}`}>
+                            {activeLevelDef.label}
+                          </p>
+                          <p className={`text-2xl font-bold ${activeLevelDef.text} mt-1`}>
+                            {(probMap[baseLevel]! * 100).toFixed(0)}%
+                          </p>
+                        </div>
+                        <div className={`rounded-lg p-4 text-center ${adjustedLevelDef.active}`}>
+                          <p className="text-xs text-gray-300 mb-2">補正予測（直前4）</p>
+                          <p className={`text-3xl font-bold ${adjustedLevelDef.text}`}>
+                            {adjustedLevelDef.label}
+                          </p>
+                          <p className={`text-2xl font-bold ${adjustedLevelDef.text} mt-1`}>
+                            {(probMap[adjustedLevel]! * 100).toFixed(0)}%
+                          </p>
+                          {ml?.adjustment_applied && ml.adjustment_pattern && (
+                            <p className="mt-1 text-[11px] text-gray-300">pattern: {ml.adjustment_pattern}</p>
+                          )}
+                        </div>
                       </div>
                     )}
 
@@ -870,7 +978,7 @@ export default function Home() {
                       : streakWarn
                         ? true
                         : macdReady
-                          ? probMacd.state === "warn" || p20hist >= 0.60
+                          ? probMacd.state === "warn" || p20hist >= 0.60 || (hasMl && Boolean(ml?.skip_recommended))
                           : p20hist >= 0.60 || (hasMl && Boolean(ml?.skip_recommended));
 
                 // 理由テキスト
@@ -894,6 +1002,14 @@ export default function Home() {
                   reasons.push(hasMl ? "しきい値判定（ML）" : "しきい値判定（履歴）");
                 }
                 if (p20hist >= 0.60) reasons.push(`窓内Blue率 ${(p20hist * 100).toFixed(0)}%`);
+                if (hasMl && Boolean(ml?.skip_recommended)) {
+                  const greenProb = ml?.prob_green ? Math.round(ml.prob_green * 100) : 0;
+                  if (greenProb >= 40) {
+                    reasons.push(`ML: Blue高確率で見送り（Green ${greenProb}% だが リスク優先）`);
+                  } else {
+                    reasons.push("ML: Blue高確率で見送り");
+                  }
+                }
 
                 const leftCard = warn20
                   ? "bg-red-950 border border-red-800"
@@ -933,149 +1049,21 @@ export default function Home() {
                 }
                 if (p12hist >= 0.25) reasons12.push(`窓内即死率 ${(p12hist * 100).toFixed(0)}%`);
 
-                const rightCard = warn12
-                  ? "bg-orange-950 border border-orange-800"
-                  : "bg-green-950 border border-green-800";
-                const rightTone = warn12 ? "text-orange-300" : "text-green-300";
-
-                return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className={`rounded-lg px-3 py-3 space-y-2 ${leftCard}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-gray-200">2.00以下 警告</p>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-blue-900 text-blue-200 border border-blue-700">第一段階</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className={`text-base font-bold ${leftTone}`}>
-                            {warn20 ? "非推奨" : "買い"}
-                          </p>
-                          <div className="mt-1 space-y-0.5">
-                            {reasons.map((r, i) => (
-                              <p key={i} className="text-[11px] text-gray-500">{r}</p>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className={`rounded-lg px-3 py-3 space-y-2 ${rightCard}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-gray-200">1.20以下 警告</p>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-orange-900 text-orange-200 border border-orange-700">第二段階</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className={`text-base font-bold ${rightTone}`}>
-                            {warn12 ? "即死注意" : "安全圏"}
-                          </p>
-                          <div className="mt-1 space-y-0.5">
-                            {reasons12.map((r, i) => (
-                              <p key={i} className="text-[11px] text-gray-500">{r}</p>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
+                return null;
               })()}
             </div>
           </section>
         );
       })()}
 
-      {/* Charts with tab switcher */}
+      {/* Charts */}
       {data?.ready && (
-        <section className="bg-gray-900 rounded-xl p-4 space-y-3">
-          {/* Tab bar */}
-          <div className="flex gap-1 border-b border-gray-700 pb-2">
-            {(
-              [
-                { key: "prob",       label: "確率遷移" },
-                { key: "prob_macd",  label: "確率MACD" },
-                { key: "multiplier", label: "倍率履歴" },
-                { key: "rsi",        label: "RSI" },
-                { key: "macd",       label: "MACD" },
-              ] as { key: ChartTab; label: string }[]
-            ).map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
-                className={`px-3 py-1 text-xs rounded-t transition-colors ${
-                  activeTab === key
-                    ? "bg-gray-700 text-white font-semibold"
-                    : "text-gray-500 hover:text-gray-300"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* Probability */}
-          {activeTab === "prob" && data.prob_2x && data.prob_5x && data.prob_10x && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex gap-4 text-xs text-gray-400">
-                  {data.prob_1_2x && <span><span className="text-slate-400 font-bold">■</span> 1.2x以下 {pct(data.prob_1_2x.current)}</span>}
-                  {data.prob_2_0x && <span><span className="text-orange-400 font-bold">■</span> 2.0x以下 {pct(data.prob_2_0x.current)}</span>}
-                  <span><span className="text-green-400 font-bold">■</span> 2x以上 {pct(data.prob_2x.current)}</span>
-                  <span><span className="text-yellow-400 font-bold">■</span> 5x以上 {pct(data.prob_5x.current)}</span>
-                  <span><span className="text-red-400 font-bold">■</span> 10x以上 {pct(data.prob_10x.current)}</span>
-                </div>
-              </div>
-              <ProbChart data={data} />
-            </div>
-          )}
-
-          {/* Prob MACD */}
-          {activeTab === "prob_macd" && (
-            <div className="space-y-3">
-              <div className="flex gap-4 text-xs text-gray-400">
-                <span><span className="text-orange-400 font-bold">■</span> 2.0x以下 MACD</span>
-                <span><span className="text-slate-400 font-bold">■</span> 1.2x以下 MACD</span>
-                <span><span className="text-gray-500 font-bold">──</span> ゼロライン</span>
-              </div>
-              <ProbMacdChart data={data} />
-            </div>
-          )}
-
-          {/* Multiplier + Bollinger */}
-          {activeTab === "multiplier" && data.chart_data && data.chart_data.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex gap-4 text-xs text-gray-400">
-                <span><span className="text-blue-400 font-bold">■</span> 倍率（対数スケール）</span>
-                <span><span className="text-gray-400 font-bold">--</span> ボリンジャーバンド</span>
-              </div>
-              <MultiplierChart data={data} />
-            </div>
-          )}
-
-          {/* RSI */}
-          {activeTab === "rsi" && data.rsi && (
-            <div className="space-y-3">
-              <div className="flex gap-4 text-xs text-gray-400">
-                <span className="text-gray-300">{data.rsi.period}期間・移動平均ベース</span>
-                <span className="text-red-400">── 70 過買い</span>
-                <span className="text-blue-400">── 30 過売り</span>
-                {data.rsi.current != null && (
-                  <span className="text-purple-400 font-bold ml-auto">現在 {data.rsi.current.toFixed(1)}</span>
-                )}
-              </div>
-              {data.rsi.chart.some((v) => v !== null)
-                ? <RsiChart rsi={data.rsi.chart} />
-                : <p className="text-sm text-gray-500 py-8 text-center">
-                    データ不足（{rsiNeeded}件以上必要、現在 {data.total_rounds} 件）
-                  </p>}
-            </div>
-          )}
-
+        <section className="space-y-4">
           {/* MACD */}
-          {activeTab === "macd" && data.macd && (
-            <div className="space-y-3">
+          {data.macd && (
+            <div className="bg-gray-900 rounded-xl p-4 space-y-3">
               <div className="flex gap-4 text-xs text-gray-400">
-                <span className="text-gray-300">{data.macd.fast}/{data.macd.slow}/{data.macd.signal_period}・移動平均ベース</span>
+                <span className="text-gray-300">MACD {data.macd.fast}/{data.macd.slow}/{data.macd.signal_period}・移動平均ベース</span>
                 <span><span className="text-blue-400 font-bold">─</span> MACD</span>
                 <span><span className="text-yellow-400 font-bold">--</span> シグナル</span>
                 <span><span className="text-green-400 font-bold">■</span> ヒストグラム</span>
@@ -1087,27 +1075,16 @@ export default function Home() {
                   </p>}
             </div>
           )}
-        </section>
-      )}
 
-      {/* Metrics */}
-      {data?.ready && (
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: "移動平均",  value: data.moving_avg != null ? fmt(data.moving_avg) : "—" },
-            { label: "中央値",    value: data.median     != null ? fmt(data.median)     : "—" },
-            { label: "標準偏差",  value: data.std_dev    != null ? fmt(data.std_dev)    : "—" },
-            { label: "ATR",      value: data.atr         != null ? fmt(data.atr)        : "—" },
-            { label: "最大値",   value: data.max         != null ? fmt(data.max)        : "—" },
-            { label: "最小値",   value: data.min         != null ? fmt(data.min)        : "—" },
-            { label: "BB上限",   value: data.bollinger_bands?.current ? fmt(data.bollinger_bands.current.upper) : "—" },
-            { label: "BB下限",   value: data.bollinger_bands?.current ? fmt(data.bollinger_bands.current.lower) : "—" },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-gray-900 rounded-xl p-3">
-              <p className="text-xs text-gray-500">{label}</p>
-              <p className="text-lg font-bold text-white">{value}</p>
+          {/* Prob MACD - 3帯域同時表示 */}
+          <div className="bg-gray-900 rounded-xl p-4 space-y-3">
+            <div className="flex gap-4 text-xs text-gray-400">
+              <span><span className="text-green-400 font-bold">■</span> 緑以上 2.01+</span>
+              <span><span className="text-yellow-400 font-bold">■</span> 黄以上 5.01+</span>
+              <span><span className="text-red-400 font-bold">■</span> 赤 10.01+</span>
             </div>
-          ))}
+            <ProbMacdChart data={data} />
+          </div>
         </section>
       )}
 

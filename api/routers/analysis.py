@@ -18,7 +18,7 @@ from analysis.calculator import (
 )
 from core.database import get_db
 from core.redis import get_redis
-from ml.predictor import predict as ml_predict
+from ml.predictor import adjust_band_with_recent4, decide_band, predict as ml_predict
 
 router = APIRouter(prefix="/api/v1/analysis", tags=["analysis"])
 
@@ -150,7 +150,7 @@ async def get_analysis(
     count_row = await db.execute(text("SELECT COUNT(*) FROM rounds"))
     total_count = count_row.scalar() or 0
 
-    rows = await db.execute(
+    rows_result = await db.execute(
         text(
             "SELECT multiplier FROM ("
             "  SELECT multiplier, recorded_at, id FROM rounds"
@@ -159,6 +159,11 @@ async def get_analysis(
         ),
         {"lim": _FETCH_LIMIT},
     )
+    rows = rows_result.fetchall()
+
+    # CPU計算中にDBコネクションを保持しないよう先にトランザクションを閉じる
+    await db.rollback()
+
     multipliers = [float(r.multiplier) for r in rows]
 
     result = calculate(multipliers, rsi_period, macd_fast, macd_slow, macd_signal, total_count=total_count)
@@ -167,6 +172,11 @@ async def get_analysis(
 
     response = _build_response(result, analyzed_at)
     if ml_result.available:
+        predicted_band_base = decide_band(ml_result)
+        predicted_band_adjusted, adjustment_applied, adjustment_pattern = adjust_band_with_recent4(
+            predicted_band_base,
+            multipliers,
+        )
         response["ml_prediction"] = {
             "available": True,
             "prob_blue":   ml_result.prob_blue,
@@ -176,6 +186,11 @@ async def get_analysis(
             "prob_blue_binary": ml_result.prob_blue_binary,
             "skip_recommended": ml_result.skip_recommended,
             "entry_boost": ml_result.entry_boost,
+            "predicted_band_base": predicted_band_base,
+            "predicted_band_adjusted": predicted_band_adjusted,
+            "adjustment_applied": adjustment_applied,
+            "adjustment_pattern": adjustment_pattern,
+            "adjustment_scope": "recent4_green_only",
         }
         # ML シグナルで entry_ok を上書き
         # skip_recommended（Blue確率 > 60%）→ 強制的に待機

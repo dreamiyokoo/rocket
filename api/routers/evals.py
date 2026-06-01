@@ -76,7 +76,7 @@ async def get_eval_stats(
     limit: int = Query(default=500, ge=1, le=5000),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await db.execute(
+    rows_result = await db.execute(
         text(
             "SELECT predicted_band, actual_band, verdict, COUNT(*) AS cnt "
             "FROM prediction_evals "
@@ -84,28 +84,34 @@ async def get_eval_stats(
             "ORDER BY predicted_band, verdict"
         )
     )
-    stats = [
-        {"predicted_band": r.predicted_band, "actual_band": r.actual_band,
-         "verdict": r.verdict, "count": r.cnt}
-        for r in rows
-    ]
+    rows = rows_result.fetchall()
 
     # 全体の的中率
-    total_row = await db.execute(
+    total_row_result = await db.execute(
         text("SELECT COUNT(*) AS total, SUM(CASE WHEN verdict='hit' THEN 1 ELSE 0 END) AS hits FROM prediction_evals")
     )
-    t = total_row.fetchone()
+    t = total_row_result.fetchone()
     total = t.total or 0
     hits = t.hits or 0
 
     # 直近 N 件
-    recent_rows = await db.execute(
+    recent_rows_result = await db.execute(
         text(
             "SELECT round_id, predicted_band, actual_band, actual_multiplier, verdict, evaluated_at "
             "FROM prediction_evals ORDER BY evaluated_at DESC LIMIT :lim"
         ),
         {"lim": limit},
     )
+    recent_rows = recent_rows_result.fetchall()
+
+    # レスポンス整形中はDB接続を保持しない
+    await db.rollback()
+
+    stats = [
+        {"predicted_band": r.predicted_band, "actual_band": r.actual_band,
+         "verdict": r.verdict, "count": r.cnt}
+        for r in rows
+    ]
     recent = [
         {
             "round_id": r.round_id,

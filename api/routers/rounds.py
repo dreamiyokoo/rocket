@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, field_validator
 from redis.asyncio import Redis
@@ -20,6 +22,7 @@ MAX_POST_VALUES = 200
 
 MULTIPLIER_MIN = 1.01
 MULTIPLIER_MAX = 501.00
+DUPLICATE_GUARD_SECONDS = 90
 
 
 class RoundsPostRequest(BaseModel):
@@ -56,13 +59,33 @@ async def post_rounds(
     history = [float(row.multiplier) for row in recent_rows]
     history.reverse()
 
+    latest_row = await db.execute(
+        text("SELECT multiplier, recorded_at FROM rounds ORDER BY recorded_at DESC, id DESC LIMIT 1")
+    )
+    latest = latest_row.fetchone()
+    last_value = float(latest.multiplier) if latest else None
+    last_recorded_at = latest.recorded_at if latest else None
+
     inserted_rounds = []
+    skipped_duplicates = 0
     for value in body.values:
+        # OCRの同一ラウンド再送対策: 直近値と同じ倍率が短時間で来た場合は重複として無視する
+        if (
+            last_value is not None
+            and value == last_value
+            and last_recorded_at is not None
+            and (datetime.now(UTC) - last_recorded_at) <= timedelta(seconds=DUPLICATE_GUARD_SECONDS)
+        ):
+            skipped_duplicates += 1
+            continue
+
         inserted_row = await db.execute(
             text("INSERT INTO rounds (multiplier) VALUES (:value) RETURNING id, multiplier, recorded_at"),
             {"value": value},
         )
         row = inserted_row.fetchone()
+        last_value = float(row.multiplier)
+        last_recorded_at = row.recorded_at
         inserted_rounds.append(
             {
                 "id": row.id,
@@ -104,7 +127,8 @@ async def post_rounds(
         pass
 
     return {
-        "inserted": len(body.values),
+        "inserted": len(inserted_rounds),
+        "skipped_duplicates": skipped_duplicates,
         "total": total,
         "ready": total >= READY_THRESHOLD,
         "inserted_rounds": inserted_rounds,

@@ -8,6 +8,7 @@ from routers.auth import router as auth_router
 from routers.capture import router as capture_router
 from routers.evals import router as evals_router
 from routers.rounds import router as rounds_router
+from routers.strategy import router as strategy_router
 from routers.ws import router as ws_router
 
 app = FastAPI(title="Rocket API")
@@ -25,6 +26,7 @@ app.include_router(rounds_router)
 app.include_router(analysis_router)
 app.include_router(evals_router)
 app.include_router(capture_router)
+app.include_router(strategy_router)
 app.include_router(ws_router)
 
 

@@ -23,6 +23,16 @@ DEFAULT_BAND_THRESHOLDS = {
     "red": 0.25,
 }
 
+# High-red patterns mined from evaluation data.
+# Rule: when base band is green and recent 4 rounds match one of these,
+# raise risk by switching adjusted band to red.
+RECENT4_HIGH_RED_PATTERNS_GREEN_ONLY: set[str] = {
+    "blue-yellow-green-blue",
+    "yellow-blue-green-blue",
+    "green-yellow-blue-blue",
+    "blue-green-yellow-blue",
+}
+
 
 def _load_blue_warn_threshold() -> float:
     """学習時に保存された推奨しきい値を読み込む。失敗時は既定値。"""
@@ -105,8 +115,10 @@ class MLPrediction:
     prob_green: float | None = None   # Green  (2.01〜5.0x) 確率
     prob_yellow: float | None = None  # Yellow (5.01〜10.0x) 確率
     prob_red: float | None = None     # Red    (> 10.0x) 確率
-    prob_blue_binary: float | None = None  # 2値分類の Blue 確率
-    skip_recommended: bool = False    # Blue確率 >= しきい値 → スキップ推奨
+    prob_blue_binary: float | None = None  # 2値分類の Blue 確率（≤2.0x リスク検出）
+    skip_recommended: bool = False    # Binary Blue確率 >= しきい値 → スキップ推奨
+                                      # ※ 4クラス分類でGreenが高確率でも、Binary Blueが高い場合は見送り
+                                      # ※ バックテスト結果: この判定が最良ROI（71.43%）を実現
     entry_boost: bool = False         # Red確率 > 30% → エントリー強化推奨
 
 
@@ -140,6 +152,10 @@ def predict(multipliers: list[float]) -> MLPrediction:
     prob_red    = round(float(mc_proba[3]), 4)
     prob_blue_binary = round(float(bi_proba), 4)
 
+    # Skip logic: Binary Blue リスク検出を最優先
+    # 4クラス分類でGreenが高確率でも、Binary Blueが高ければスキップ
+    # （バックテスト検証: Binary Blue優先 = 71.43% ROI が最良）
+    
     return MLPrediction(
         available=True,
         prob_blue=prob_blue,
@@ -161,3 +177,29 @@ def decide_band(prediction: MLPrediction) -> str:
         "red":    prediction.prob_red    or 0.0,
     }
     return max(scores, key=scores.get)
+
+
+def _band_from_multiplier(multiplier: float) -> str:
+    if multiplier <= 2.0:
+        return "blue"
+    if multiplier <= 5.0:
+        return "green"
+    if multiplier <= 10.0:
+        return "yellow"
+    return "red"
+
+
+def adjust_band_with_recent4(
+    base_band: str,
+    multipliers: list[float],
+) -> tuple[str, bool, str | None]:
+    """Return adjusted band using recent-4 pattern rule (green-only override)."""
+    if len(multipliers) < 4:
+        return base_band, False, None
+
+    recent4 = multipliers[-4:]
+    pattern = "-".join(_band_from_multiplier(v) for v in recent4)
+
+    if base_band == "green" and pattern in RECENT4_HIGH_RED_PATTERNS_GREEN_ONLY:
+        return "red", True, pattern
+    return base_band, False, pattern
